@@ -1,0 +1,30 @@
+{
+  "name": "rag",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Progressive, hand-built RAG system (Bun + TypeScript + Qdrant + Ollama)",
+  "scripts": {
+    "bootstrap": "bash scripts/bootstrap.sh",
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
+    "infra:reset": "bash scripts/reset.sh",
+    "infra:logs": "docker compose logs -f",
+    "infra:ps": "docker compose ps",
+    "models:pull": "ollama pull bge-m3 && ollama pull llama3.1",
+    "ingest": "bun src/cli/ingest.ts",
+    "ask": "bun src/cli/ask.ts",
+    "dev": "bun --watch src/api/server.ts",
+    "start": "bun src/api/server.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@qdrant/js-client-rest": "^1.13.0",
+    "hono": "^4.7.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.4",
+    "typescript": "^5.7.0"
+  }
+}
