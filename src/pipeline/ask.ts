@@ -68,7 +68,7 @@ const run = async (
   const result = await trace.span("generate", async (span) => {
     const promptChars = messages.reduce((total, message) => total + message.content.length, 0);
     span.set({ model: deps.llm.model, promptChars, messages });
-    const reply = await deps.llm.chat(messages);
+    const reply = await deps.llm.chat(messages, { think: false });
     const usage = reply.usage ?? {};
     const tokensPerSec = usage.outputTokens && usage.evalMs ? usage.outputTokens / (usage.evalMs / 1000) : undefined;
     span.set({

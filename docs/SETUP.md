@@ -21,7 +21,7 @@ bun run bootstrap
 2. Creates `.env` from `.env.example` if missing.
 3. Runs `bun install`.
 4. Starts Qdrant, Postgres and MinIO with `docker compose up -d` and waits until they are healthy.
-5. Verifies Ollama is reachable and pulls `bge-m3` and `llama3.1` if absent (about 6 GB total the first time).
+5. Verifies Ollama is reachable and pulls `bge-m3` and `qwen3.5:35b` if absent (about 23 GB total the first time).
 6. Creates the Qdrant collection with the right vector dimension.
 
 Then:

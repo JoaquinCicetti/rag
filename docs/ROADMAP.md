@@ -135,7 +135,7 @@ Construir una plataforma tipo "Knowledge AI":
 | Backend | Bun + TypeScript | en uso |
 | API | Hono | en uso |
 | Vector DB | Qdrant (Docker) | en uso |
-| LLM local | Ollama (`llama3.1`) | en uso |
+| LLM local | Ollama (`qwen3.5:35b`) | en uso |
 | Embeddings | Ollama (`bge-m3`, multilingüe, 1024 dims) | en uso |
 | Storage de archivos | MinIO (S3-compatible, Docker) | levantado, sin uso hasta el paso 9 |
 | Database | PostgreSQL (Docker) | levantado, sin uso hasta el paso 9 |
