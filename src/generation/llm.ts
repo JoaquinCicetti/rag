@@ -42,6 +42,7 @@ export interface LLMResult {
 export interface ChatOptions {
   temperature?: number;
   tools?: Array<ToolDefinition>;
+  think?: boolean;
 }
 
 export interface LLM {
@@ -222,6 +223,7 @@ export class OllamaLLM implements LLM {
         messages: messages.map(toOllamaMessage),
         stream: false,
         options: { temperature: options?.temperature ?? 0 },
+        ...(options?.think !== undefined && { think: options.think }),
         ...(options?.tools && {
           tools: options.tools.map((tool) => ({ type: "function", function: tool })),
         }),

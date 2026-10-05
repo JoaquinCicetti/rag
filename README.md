@@ -2,7 +2,7 @@
 
 A progressive, hand-built Retrieval-Augmented Generation system. Every component is implemented manually first (no LangChain/LlamaIndex) so each piece of the pipeline is understood before any framework is introduced.
 
-Stack: Bun + TypeScript, Hono, Qdrant, Ollama (`bge-m3` embeddings, `llama3.1` generation), Postgres and MinIO (from step 9), Docker Compose.
+Stack: Bun + TypeScript, Hono, Qdrant, Ollama (`bge-m3` embeddings, `qwen3.5:35b` generation), Postgres and MinIO (from step 9), Docker Compose.
 
 ## Quickstart
 

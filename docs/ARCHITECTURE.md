@@ -7,7 +7,7 @@ Current state: step 1 (MVP). This document is updated as each roadmap step lands
 ```
 INGEST   file/dir ──► loaders ──► chunk (fixed size + overlap) ──► embed (Ollama bge-m3) ──► Qdrant upsert
                                           │ stable ids: uuid(sha256(sourceId:chunkIndex))
-ASK      question ──► embed ──► Qdrant search (cosine, top-k) ──► context builder ([n] + source) ──► LLM (Ollama llama3.1) ──► answer + citations
+ASK      question ──► embed ──► Qdrant search (cosine, top-k) ──► context builder ([n] + source) ──► LLM (Ollama qwen3.5:35b) ──► answer + citations
 ```
 
 ## Module map

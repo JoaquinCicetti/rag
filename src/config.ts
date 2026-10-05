@@ -22,7 +22,7 @@ export const config = {
   },
   llm: {
     provider: env("LLM_PROVIDER", "ollama") as "ollama" | "anthropic",
-    model: env("LLM_MODEL", "llama3.1"),
+    model: env("LLM_MODEL", "qwen3.5:35b"),
     anthropicModel: env("ANTHROPIC_MODEL", "claude-sonnet-5"),
     anthropicApiKey: env("ANTHROPIC_API_KEY", ""),
   },

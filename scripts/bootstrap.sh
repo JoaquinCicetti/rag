@@ -16,7 +16,7 @@ set -a; source .env; set +a
 OLLAMA_URL="${OLLAMA_URL:-http://127.0.0.1:11434}"
 QDRANT_URL="${QDRANT_URL:-http://127.0.0.1:6333}"
 EMBED_MODEL="${EMBED_MODEL:-bge-m3}"
-LLM_MODEL="${LLM_MODEL:-llama3.1}"
+LLM_MODEL="${LLM_MODEL:-qwen3.5:35b}"
 
 echo "==> bun install"
 bun install --silent
