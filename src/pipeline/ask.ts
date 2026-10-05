@@ -1,11 +1,10 @@
-import type { Embedder } from "../embeddings/ollama.ts";
 import { buildContext } from "../generation/context.ts";
 import type { ChatMessage, LLM } from "../generation/llm.ts";
 import { NO_INFO, SYSTEM_PROMPT, userPrompt } from "../generation/prompt.ts";
 import { Trace, writeTrace } from "../observability/trace.ts";
-import { vectorSearch } from "../retrieval/search.ts";
+import { vectorSearch, type SearchDeps } from "../retrieval/search.ts";
 import type { Answer } from "../types.ts";
-import type { SearchFilter, VectorStore } from "../vectorstore/qdrant.ts";
+import type { SearchFilter } from "../vectorstore/qdrant.ts";
 
 export interface AskOptions {
   topK?: number;
@@ -13,88 +12,88 @@ export interface AskOptions {
   maxContextChars?: number;
 }
 
-/** search -> build context -> LLM -> answer with citations. Every run writes a trace. */
-export const ask = async (
-  question: string,
-  deps: { embedder: Embedder; store: VectorStore; llm: LLM },
-  opts: AskOptions = {},
-): Promise<Answer> => {
-  const q = question.trim();
-  if (!q) throw new Error("question is empty");
+export interface AskDeps extends SearchDeps {
+  llm: LLM;
+}
 
-  const trace = new Trace("ask", q);
+export const ask = async (question: string, deps: AskDeps, options?: AskOptions): Promise<Answer> => {
+  const trimmedQuestion = question.trim();
+  if (!trimmedQuestion) throw new Error("question is empty");
+
+  const trace = new Trace("ask", trimmedQuestion);
   try {
-    return await run(q, deps, opts, trace);
-  } catch (e) {
-    trace.fail(e);
-    throw e;
+    return await run(trimmedQuestion, deps, options, trace);
+  } catch (error) {
+    trace.fail(error);
+    throw error;
   } finally {
-    await writeTrace(trace.finish()).catch((e) => console.error(`trace write failed: ${(e as Error).message}`));
+    await writeTrace(trace.finish()).catch((error) => console.error(`trace write failed: ${(error as Error).message}`));
   }
 };
 
 const run = async (
-  q: string,
-  deps: { embedder: Embedder; store: VectorStore; llm: LLM },
-  opts: AskOptions,
+  question: string,
+  deps: AskDeps,
+  options: AskOptions | undefined,
   trace: Trace,
 ): Promise<Answer> => {
-  const t0 = performance.now();
-  const { chunks, timings } = await vectorSearch(q, deps, { topK: opts.topK, filter: opts.filter, trace });
+  const startedAt = performance.now();
+  const { chunks, timings } = await vectorSearch(question, deps, { topK: options?.topK, filter: options?.filter, trace });
 
   if (chunks.length === 0) {
     trace.set({ outcome: "no-chunks" });
     return {
       traceId: trace.id,
-      question: q,
+      question,
       answer: NO_INFO,
       citations: [],
       retrieved: [],
       model: deps.llm.model,
-      timings: { ...timings, generateMs: 0, totalMs: performance.now() - t0 },
+      timings: { ...timings, generateMs: 0, totalMs: performance.now() - startedAt },
     };
   }
 
-  const ctx = await trace.span("context", (span) => {
-    const c = buildContext(chunks, { maxChars: opts.maxContextChars });
-    span.set({ included: c.citations.length, dropped: c.dropped, chars: c.chars, budget: c.budget });
-    return c;
+  const context = await trace.span("context", (span) => {
+    const built = buildContext(chunks, { maxChars: options?.maxContextChars });
+    span.set({ included: built.citations.length, dropped: built.dropped, chars: built.chars, budget: built.budget });
+    return built;
   });
 
-  const messages: ChatMessage[] = [
+  const messages: Array<ChatMessage> = [
     { role: "system", content: SYSTEM_PROMPT },
-    { role: "user", content: userPrompt(q, ctx.text) },
+    { role: "user", content: userPrompt(question, context.text) },
   ];
 
-  const t1 = performance.now();
+  const generateStartedAt = performance.now();
   const result = await trace.span("generate", async (span) => {
-    span.set({ model: deps.llm.model, promptChars: messages.reduce((n, m) => n + m.content.length, 0), messages });
-    const r = await deps.llm.chat(messages);
-    const u = r.usage ?? {};
+    const promptChars = messages.reduce((total, message) => total + message.content.length, 0);
+    span.set({ model: deps.llm.model, promptChars, messages });
+    const reply = await deps.llm.chat(messages);
+    const usage = reply.usage ?? {};
+    const tokensPerSec = usage.outputTokens && usage.evalMs ? usage.outputTokens / (usage.evalMs / 1000) : undefined;
     span.set({
-      model: r.model,
-      ...u,
-      ...(u.outputTokens && u.evalMs ? { outputTokensPerSec: u.outputTokens / (u.evalMs / 1000) } : {}),
-      answerChars: r.text.length,
+      model: reply.model,
+      ...usage,
+      ...(tokensPerSec ? { outputTokensPerSec: tokensPerSec } : {}),
+      answerChars: reply.text.length,
     });
-    return r;
+    return reply;
   });
-  const generateMs = performance.now() - t1;
+  const generateMs = performance.now() - generateStartedAt;
 
-  // Only keep citations the model actually referenced; keeps the trail honest.
-  const referenced = new Set([...result.text.matchAll(/\[(\d+)\]/g)].map((m) => Number(m[1])));
-  const citations = referenced.size > 0 ? ctx.citations.filter((c) => referenced.has(c.n)) : [];
-  trace.set({ citations: citations.map((c) => c.n), answer: result.text });
+  const referenced = new Set([...result.text.matchAll(/\[(\d+)\]/g)].map((match) => Number(match[1])));
+  const citations = referenced.size > 0 ? context.citations.filter((citation) => referenced.has(citation.n)) : [];
+  trace.set({ citations: citations.map((citation) => citation.n), answer: result.text });
 
   return {
     traceId: trace.id,
-    question: q,
+    question,
     answer: result.text,
     citations,
     retrieved: chunks,
     model: result.model,
     usage: result.usage,
-    context: { chars: ctx.chars, budget: ctx.budget, included: ctx.citations.length, dropped: ctx.dropped },
-    timings: { ...timings, generateMs, totalMs: performance.now() - t0 },
+    context: { chars: context.chars, budget: context.budget, included: context.citations.length, dropped: context.dropped },
+    timings: { ...timings, generateMs, totalMs: performance.now() - startedAt },
   };
 };

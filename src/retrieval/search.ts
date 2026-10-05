@@ -1,7 +1,7 @@
 import { config } from "../config.ts";
 import type { Embedder } from "../embeddings/ollama.ts";
 import { inSpan, type Trace } from "../observability/trace.ts";
-import type { RetrievedChunk } from "../types.ts";
+import type { RetrievedChunk, SearchTimings } from "../types.ts";
 import type { SearchFilter, VectorStore } from "../vectorstore/qdrant.ts";
 
 export interface SearchOptions {
@@ -11,46 +11,48 @@ export interface SearchOptions {
 }
 
 export interface SearchResult {
-  chunks: RetrievedChunk[];
-  timings: { embedMs: number; searchMs: number };
+  chunks: Array<RetrievedChunk>;
+  timings: SearchTimings;
 }
 
-/**
- * Step 1 retrieval: pure vector search.
- * Step 3 adds BM25, hybrid fusion and re-ranking behind this same signature.
- */
+export interface SearchDeps {
+  embedder: Embedder;
+  store: VectorStore;
+}
+
 export const vectorSearch = async (
   query: string,
-  deps: { embedder: Embedder; store: VectorStore },
-  opts: SearchOptions = {},
+  deps: SearchDeps,
+  options?: SearchOptions,
 ): Promise<SearchResult> => {
-  const topK = opts.topK ?? config.retrieval.topK;
+  const topK = options?.topK ?? config.retrieval.topK;
+  const filter = options?.filter;
 
-  const t0 = performance.now();
-  const vector = await inSpan(opts.trace, "embed", async (span) => {
+  const startedAt = performance.now();
+  const vector = await inSpan(options?.trace, "embed", async (span) => {
     const { embeddings, stats } = await deps.embedder.embedWithStats([query]);
     span.set({ model: deps.embedder.model, inputTokens: stats.inputTokens, loadMs: stats.loadMs });
-    const [v] = embeddings;
-    if (!v) throw new Error("empty embedding");
-    return v;
+    const [embedding] = embeddings;
+    if (!embedding) throw new Error("empty embedding");
+    return embedding;
   });
-  const t1 = performance.now();
-  const chunks = await inSpan(opts.trace, "search", async (span) => {
-    const res = await deps.store.search(vector, topK, opts.filter);
+  const embeddedAt = performance.now();
+  const chunks = await inSpan(options?.trace, "search", async (span) => {
+    const hits = await deps.store.search(vector, topK, filter);
     span.set({
       store: "qdrant",
       topK,
-      returned: res.length,
-      ...(opts.filter ? { filter: opts.filter } : {}),
-      hits: res.map((c) => ({
-        id: c.id,
-        score: c.score,
-        source: `${c.metadata.sourcePath}#chunk${c.metadata.chunkIndex}`,
+      returned: hits.length,
+      ...(filter ? { filter } : {}),
+      hits: hits.map((hit) => ({
+        id: hit.id,
+        score: hit.score,
+        source: `${hit.metadata.sourcePath}#chunk${hit.metadata.chunkIndex}`,
       })),
     });
-    return res;
+    return hits;
   });
-  const t2 = performance.now();
+  const searchedAt = performance.now();
 
-  return { chunks, timings: { embedMs: t1 - t0, searchMs: t2 - t1 } };
+  return { chunks, timings: { embedMs: embeddedAt - startedAt, searchMs: searchedAt - embeddedAt } };
 };

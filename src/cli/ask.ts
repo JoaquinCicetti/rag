@@ -1,4 +1,3 @@
-/** Usage: bun run ask "question" [--top-k 5] [--json] [--show-context] [--trace] */
 import { parseArgs } from "node:util";
 import { createEmbedder } from "../embeddings/ollama.ts";
 import { createLLM } from "../generation/llm.ts";
@@ -38,26 +37,26 @@ if (values.json) {
 console.log(`\n${answer.answer}\n`);
 if (answer.citations.length > 0) {
   console.log("Sources:");
-  for (const c of answer.citations) {
-    console.log(`  [${c.n}] ${c.sourcePath}#chunk${c.chunkIndex} (score ${c.score.toFixed(3)}) — ${c.title}`);
+  for (const citation of answer.citations) {
+    console.log(`  [${citation.n}] ${citation.sourcePath}#chunk${citation.chunkIndex} (score ${citation.score.toFixed(3)}) — ${citation.title}`);
   }
 }
 if (values["show-context"]) {
   console.log("\nRetrieved chunks:");
-  for (const [i, r] of answer.retrieved.entries()) {
-    console.log(`\n--- [${i + 1}] ${r.metadata.sourcePath}#chunk${r.metadata.chunkIndex} score=${r.score.toFixed(3)}\n${r.text}`);
+  for (const [index, chunk] of answer.retrieved.entries()) {
+    console.log(`\n--- [${index + 1}] ${chunk.metadata.sourcePath}#chunk${chunk.metadata.chunkIndex} score=${chunk.score.toFixed(3)}\n${chunk.text}`);
   }
 }
-const t = answer.timings;
-const u = answer.usage;
-const fmt = (v?: number) => (v === undefined ? "?" : String(v));
-const tokens = u
-  ? ` | tokens in=${fmt(u.inputTokens)} (cached ${fmt(u.cachedInputTokens)}) out=${fmt(u.outputTokens)}` +
-    (u.outputTokens && u.evalMs ? ` ${(u.outputTokens / (u.evalMs / 1000)).toFixed(1)} tok/s` : "")
+const timings = answer.timings;
+const usage = answer.usage;
+const orUnknown = (value?: number): string => (value === undefined ? "?" : String(value));
+const speed = usage?.outputTokens && usage.evalMs ? ` ${(usage.outputTokens / (usage.evalMs / 1000)).toFixed(1)} tok/s` : "";
+const tokens = usage
+  ? ` | tokens in=${orUnknown(usage.inputTokens)} (cached ${orUnknown(usage.cachedInputTokens)}) out=${orUnknown(usage.outputTokens)}${speed}`
   : "";
-const ctx = answer.context ? ` | context ${answer.context.chars}/${answer.context.budget} chars` : "";
+const contextSize = answer.context ? ` | context ${answer.context.chars}/${answer.context.budget} chars` : "";
 console.log(
-  `\nmodel=${answer.model} embed=${t.embedMs.toFixed(0)}ms search=${t.searchMs.toFixed(0)}ms generate=${t.generateMs.toFixed(0)}ms total=${t.totalMs.toFixed(0)}ms${ctx}${tokens}`,
+  `\nmodel=${answer.model} embed=${timings.embedMs.toFixed(0)}ms search=${timings.searchMs.toFixed(0)}ms generate=${timings.generateMs.toFixed(0)}ms total=${timings.totalMs.toFixed(0)}ms${contextSize}${tokens}`,
 );
 
 if (values.trace) {

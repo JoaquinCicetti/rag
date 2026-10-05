@@ -2,66 +2,71 @@ import { config } from "../config.ts";
 
 export interface EmbedStats {
   batches: number;
-  /** Tokens processed by the embedding model, as reported by Ollama. */
   inputTokens: number;
-  /** Time spent loading the model into memory (cold start), summed over batches. */
   loadMs: number;
-  /** Wall time of all requests. */
   totalMs: number;
+}
+
+export interface EmbedResult {
+  embeddings: Array<Array<number>>;
+  stats: EmbedStats;
+}
+
+export interface EmbedderConnection {
+  url?: string;
+  model?: string;
+  dim?: number;
+  batchSize?: number;
 }
 
 export interface Embedder {
   readonly model: string;
   readonly dim: number;
-  embed(texts: string[]): Promise<number[][]>;
-  embedOne(text: string): Promise<number[]>;
-  embedWithStats(texts: string[]): Promise<{ embeddings: number[][]; stats: EmbedStats }>;
+  embed(texts: Array<string>): Promise<Array<Array<number>>>;
+  embedOne(text: string): Promise<Array<number>>;
+  embedWithStats(texts: Array<string>): Promise<EmbedResult>;
 }
 
 interface OllamaEmbedResponse {
   model: string;
-  embeddings: number[][];
+  embeddings: Array<Array<number>>;
   prompt_eval_count?: number;
-  /** Nanoseconds. */
   load_duration?: number;
 }
 
-/**
- * Embeddings via Ollama's /api/embed (batched). No SDK, plain fetch,
- * so every request is visible and easy to trace later (step 8).
- */
 export class OllamaEmbedder implements Embedder {
   readonly model: string;
   readonly dim: number;
   private readonly url: string;
   private readonly batchSize: number;
 
-  constructor(opts?: { url?: string; model?: string; dim?: number; batchSize?: number }) {
-    this.url = opts?.url ?? config.ollama.url;
-    this.model = opts?.model ?? config.embeddings.model;
-    this.dim = opts?.dim ?? config.embeddings.dim;
-    this.batchSize = opts?.batchSize ?? config.embeddings.batchSize;
+  constructor(connection?: EmbedderConnection) {
+    this.url = connection?.url ?? config.ollama.url;
+    this.model = connection?.model ?? config.embeddings.model;
+    this.dim = connection?.dim ?? config.embeddings.dim;
+    this.batchSize = connection?.batchSize ?? config.embeddings.batchSize;
   }
 
-  async embed(texts: string[]): Promise<number[][]> {
+  async embed(texts: Array<string>): Promise<Array<Array<number>>> {
     return (await this.embedWithStats(texts)).embeddings;
   }
 
-  async embedWithStats(texts: string[]): Promise<{ embeddings: number[][]; stats: EmbedStats }> {
-    const t0 = performance.now();
-    const out: number[][] = [];
+  async embedWithStats(texts: Array<string>): Promise<EmbedResult> {
+    const startedAt = performance.now();
+    const embeddings: Array<Array<number>> = [];
     const stats: EmbedStats = { batches: 0, inputTokens: 0, loadMs: 0, totalMs: 0 };
     for (let i = 0; i < texts.length; i += this.batchSize) {
       const batch = texts.slice(i, i + this.batchSize);
-      const res = await fetch(`${this.url}/api/embed`, {
+      const response = await fetch(`${this.url}/api/embed`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ model: this.model, input: batch }),
       });
-      if (!res.ok) {
-        throw new Error(`ollama embed failed (${res.status}): ${await res.text()}`);
+      if (!response.ok) {
+        const body = await response.text();
+        throw new Error(`ollama embed failed (${response.status}): ${body}`);
       }
-      const data = (await res.json()) as OllamaEmbedResponse;
+      const data = (await response.json()) as OllamaEmbedResponse;
       if (data.embeddings.length !== batch.length) {
         throw new Error(`ollama returned ${data.embeddings.length} embeddings for ${batch.length} inputs`);
       }
@@ -71,19 +76,19 @@ export class OllamaEmbedder implements Embedder {
           `embedding dim mismatch: model ${this.model} returned ${first.length}, EMBED_DIM=${this.dim}`,
         );
       }
-      out.push(...data.embeddings);
+      embeddings.push(...data.embeddings);
       stats.batches++;
       stats.inputTokens += data.prompt_eval_count ?? 0;
       stats.loadMs += (data.load_duration ?? 0) / 1e6;
     }
-    stats.totalMs = performance.now() - t0;
-    return { embeddings: out, stats };
+    stats.totalMs = performance.now() - startedAt;
+    return { embeddings, stats };
   }
 
-  async embedOne(text: string): Promise<number[]> {
-    const [v] = await this.embed([text]);
-    if (!v) throw new Error("empty embedding");
-    return v;
+  async embedOne(text: string): Promise<Array<number>> {
+    const [embedding] = await this.embed([text]);
+    if (!embedding) throw new Error("empty embedding");
+    return embedding;
   }
 }
 

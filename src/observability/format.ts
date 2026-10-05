@@ -1,106 +1,119 @@
+import type { ChatMessage } from "../generation/llm.ts";
 import type { Attrs, SpanRecord, TraceRecord } from "./trace.ts";
 
-const n = (v: unknown): string => (typeof v === "number" ? Math.round(v).toLocaleString("en-US") : "?");
-const ms = (v: unknown): string => (typeof v === "number" ? `${n(v)}ms` : "?");
-const num = (v: unknown): number | undefined => (typeof v === "number" ? v : undefined);
+export interface FormatOptions {
+  prompt?: boolean;
+}
 
-/** Rough chars→tokens estimate, only used where the provider gives no real count. */
+interface ScoredHit {
+  score: number;
+}
+
+const COLD_LOAD_MS = 100;
+
+const count = (value: unknown): string => (typeof value === "number" ? Math.round(value).toLocaleString("en-US") : "?");
+const millis = (value: unknown): string => (typeof value === "number" ? `${count(value)}ms` : "?");
+const numberOf = (value: unknown): number | undefined => (typeof value === "number" ? value : undefined);
 const approxTokens = (chars: number): number => Math.round(chars / 4);
+const truncate = (text: string, max: number): string => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+const isColdLoad = (loadMs: unknown): boolean => (numberOf(loadMs) ?? 0) > COLD_LOAD_MS;
 
-/** One-line summary of a span's attributes, specialised for the spans we emit. */
-const describe = (s: SpanRecord): string[] => {
-  const a = s.attrs;
-  switch (s.name) {
-    case "embed": {
-      const tps = num(a.tokensPerSec);
-      return [
-        `${a.model ?? ""}  ${n(a.inputTokens)} tok` +
-          (num(a.batches) !== undefined ? `  ${n(a.batches)} batch(es)` : "") +
-          (tps ? `  ${n(tps)} tok/s` : "") +
-          (num(a.loadMs) && (a.loadMs as number) > 100 ? `  load ${ms(a.loadMs)} (cold)` : ""),
-      ];
-    }
-    case "search": {
-      const hits = (a.hits as Array<{ score: number }> | undefined) ?? [];
-      const scores = hits.map((h) => h.score);
-      const range = scores.length ? `scores ${Math.max(...scores).toFixed(3)}–${Math.min(...scores).toFixed(3)}` : "no hits";
-      return [`${a.store ?? ""}  top-k ${n(a.topK)}, ${n(a.returned)} returned, ${range}`];
-    }
+const describeEmbed = (attrs: Attrs): Array<string> => {
+  const tokensPerSec = numberOf(attrs.tokensPerSec);
+  const batches = numberOf(attrs.batches) !== undefined ? `  ${count(attrs.batches)} batch(es)` : "";
+  const speed = tokensPerSec ? `  ${count(tokensPerSec)} tok/s` : "";
+  const coldLoad = isColdLoad(attrs.loadMs) ? `  load ${millis(attrs.loadMs)} (cold)` : "";
+  return [`${attrs.model ?? ""}  ${count(attrs.inputTokens)} tok${batches}${speed}${coldLoad}`];
+};
+
+const describeSearch = (attrs: Attrs): Array<string> => {
+  const hits = (attrs.hits as Array<ScoredHit> | undefined) ?? [];
+  const scores = hits.map((hit) => hit.score);
+  const range = scores.length ? `scores ${Math.max(...scores).toFixed(3)}–${Math.min(...scores).toFixed(3)}` : "no hits";
+  return [`${attrs.store ?? ""}  top-k ${count(attrs.topK)}, ${count(attrs.returned)} returned, ${range}`];
+};
+
+const describeContext = (attrs: Attrs): Array<string> => {
+  const considered = numberOf(attrs.included)! + numberOf(attrs.dropped)!;
+  const tokens = approxTokens(numberOf(attrs.chars) ?? 0);
+  return [`${count(attrs.included)}/${count(considered)} chunks  ${count(attrs.chars)} chars ≈ ${count(tokens)} tok  (budget ${count(attrs.budget)})`];
+};
+
+const describeGenerate = (attrs: Attrs): Array<string> => {
+  const lines = [`${attrs.model ?? ""}`];
+  if (numberOf(attrs.loadMs) !== undefined) lines.push(`load     ${millis(attrs.loadMs)}${isColdLoad(attrs.loadMs) ? " (cold)" : ""}`);
+  const cached = numberOf(attrs.cachedInputTokens);
+  const cachedLabel = cached !== undefined ? `  (${count(cached)} cached)` : "";
+  const writtenLabel = numberOf(attrs.cacheWriteTokens) ? `  (${count(attrs.cacheWriteTokens)} written to cache)` : "";
+  const promptTime = numberOf(attrs.promptEvalMs) !== undefined ? `  ${millis(attrs.promptEvalMs)}` : "";
+  lines.push(`prompt   ${count(attrs.inputTokens)} tok${cachedLabel}${writtenLabel}${promptTime}  [${count(attrs.promptChars)} chars]`);
+  const tokensPerSec = numberOf(attrs.outputTokensPerSec);
+  const outputTime = numberOf(attrs.evalMs) !== undefined ? `  ${millis(attrs.evalMs)}` : "";
+  const speed = tokensPerSec ? `  ${tokensPerSec.toFixed(1)} tok/s` : "";
+  lines.push(`output   ${count(attrs.outputTokens)} tok${outputTime}${speed}`);
+  return lines;
+};
+
+const describe = (span: SpanRecord): Array<string> => {
+  const attrs = span.attrs;
+  switch (span.name) {
+    case "embed":
+      return describeEmbed(attrs);
+    case "search":
+      return describeSearch(attrs);
     case "context":
-      return [
-        `${n(a.included)}/${n(num(a.included)! + num(a.dropped)!)} chunks  ${n(a.chars)} chars ≈ ${n(approxTokens(num(a.chars) ?? 0))} tok  (budget ${n(a.budget)})`,
-      ];
-    case "generate": {
-      const lines = [`${a.model ?? ""}`];
-      if (num(a.loadMs) !== undefined) lines.push(`load     ${ms(a.loadMs)}${(a.loadMs as number) > 100 ? " (cold)" : ""}`);
-      const cached = num(a.cachedInputTokens);
-      lines.push(
-        `prompt   ${n(a.inputTokens)} tok` +
-          (cached !== undefined ? `  (${n(cached)} cached)` : "") +
-          (num(a.cacheWriteTokens) ? `  (${n(a.cacheWriteTokens)} written to cache)` : "") +
-          (num(a.promptEvalMs) !== undefined ? `  ${ms(a.promptEvalMs)}` : "") +
-          `  [${n(a.promptChars)} chars]`,
-      );
-      const tps = num(a.outputTokensPerSec);
-      lines.push(
-        `output   ${n(a.outputTokens)} tok` +
-          (num(a.evalMs) !== undefined ? `  ${ms(a.evalMs)}` : "") +
-          (tps ? `  ${tps.toFixed(1)} tok/s` : ""),
-      );
-      return lines;
-    }
+      return describeContext(attrs);
+    case "generate":
+      return describeGenerate(attrs);
     case "chunk":
-      return [`${n(a.chunks)} chunks, avg ${n(a.avgChars)} chars`];
+      return [`${count(attrs.chunks)} chunks, avg ${count(attrs.avgChars)} chars`];
     case "upsert":
-      return [`${n(a.points)} points`];
+      return [`${count(attrs.points)} points`];
     case "load":
-      return [`${n(a.documents)} document(s), ${n(a.chars)} chars`];
+      return [`${count(attrs.documents)} document(s), ${count(attrs.chars)} chars`];
     case "document":
-      return [`${a.sourcePath ?? ""}  ${n(a.chars)} chars → ${n(a.chunks)} chunks`];
+      return [`${attrs.sourcePath ?? ""}  ${count(attrs.chars)} chars → ${count(attrs.chunks)} chunks`];
     default:
       return [];
   }
 };
 
-/** Render a trace as an indented tree with one block per span. */
-export const formatTrace = (t: TraceRecord, opts: { prompt?: boolean } = {}): string => {
-  const out: string[] = [];
-  const label = t.input.length > 70 ? `${t.input.slice(0, 69)}…` : t.input;
-  out.push(`trace ${t.id.slice(0, 8)}  ${t.kind}  "${label}"  ${t.startedAt}`);
-  for (const s of t.spans) {
-    const indent = "  ".repeat(s.depth);
-    const [first = "", ...rest] = describe(s);
-    out.push(`${indent}├─ ${s.name.padEnd(14 - indent.length)} ${ms(s.durationMs).padStart(9)}   ${first}`);
-    for (const line of rest) out.push(`${indent}│    ${" ".repeat(20 - indent.length)}${line}`);
-    if (s.error) out.push(`${indent}│    error: ${s.error}`);
-  }
-  out.push(`total ${ms(t.durationMs)}${t.error ? `  ERROR: ${t.error}` : ""}`);
-
-  if (opts.prompt) {
-    const gen = t.spans.find((s) => s.name === "generate");
-    const messages = (gen?.attrs.messages as Array<{ role: string; content: string }> | undefined) ?? [];
-    for (const m of messages) out.push("", `===== ${m.role} (${n(m.content.length)} chars) =====`, m.content);
-    if (typeof t.attrs.answer === "string") out.push("", "===== answer =====", t.attrs.answer);
-  }
-  return out.join("\n");
+const formatPrompt = (trace: TraceRecord): Array<string> => {
+  const generateSpan = trace.spans.find((span) => span.name === "generate");
+  const messages = (generateSpan?.attrs.messages as Array<ChatMessage> | undefined) ?? [];
+  const lines = messages.flatMap((message) => ["", `===== ${message.role} (${count(message.content.length)} chars) =====`, message.content]);
+  if (typeof trace.attrs.answer === "string") lines.push("", "===== answer =====", trace.attrs.answer);
+  return lines;
 };
 
-/** Token totals of the generate span, used by list views and the ask footer. */
-export const usageOf = (t: TraceRecord): Attrs => t.spans.find((s) => s.name === "generate")?.attrs ?? {};
+export const formatTrace = (trace: TraceRecord, options?: FormatOptions): string => {
+  const lines = [`trace ${trace.id.slice(0, 8)}  ${trace.kind}  "${truncate(trace.input, 70)}"  ${trace.startedAt}`];
+  for (const span of trace.spans) {
+    const indent = "  ".repeat(span.depth);
+    const [firstLine = "", ...moreLines] = describe(span);
+    lines.push(`${indent}├─ ${span.name.padEnd(14 - indent.length)} ${millis(span.durationMs).padStart(9)}   ${firstLine}`);
+    for (const line of moreLines) lines.push(`${indent}│    ${" ".repeat(20 - indent.length)}${line}`);
+    if (span.error) lines.push(`${indent}│    error: ${span.error}`);
+  }
+  lines.push(`total ${millis(trace.durationMs)}${trace.error ? `  ERROR: ${trace.error}` : ""}`);
+  if (options?.prompt) lines.push(...formatPrompt(trace));
+  return lines.join("\n");
+};
 
-/** One line per trace, newest first. */
-export const formatTraceList = (traces: TraceRecord[]): string => {
+export const usageOf = (trace: TraceRecord): Attrs => trace.spans.find((span) => span.name === "generate")?.attrs ?? {};
+
+const formatListRow = (trace: TraceRecord): string => {
+  const usage = usageOf(trace);
+  const tokens =
+    trace.kind === "ask"
+      ? `in ${count(usage.inputTokens)} (cached ${count(usage.cachedInputTokens)}) out ${count(usage.outputTokens)}`
+      : `${count(trace.attrs.chunks)} chunks, ${count(trace.attrs.embedTokens)} tok embedded`;
+  const when = trace.startedAt.replace("T", " ").slice(0, 19);
+  const failed = trace.error ? "  [error]" : "";
+  return `${when}  ${trace.id.slice(0, 8)}  ${trace.kind.padEnd(6)} ${millis(trace.durationMs).padStart(9)}  ${tokens.padEnd(36)}  ${truncate(trace.input, 48)}${failed}`;
+};
+
+export const formatTraceList = (traces: Array<TraceRecord>): string => {
   if (traces.length === 0) return "no traces yet (run `bun run ask ...` or `bun run ingest ...`)";
-  return traces
-    .map((t) => {
-      const u = usageOf(t);
-      const tokens =
-        t.kind === "ask"
-          ? `in ${n(u.inputTokens)} (cached ${n(u.cachedInputTokens)}) out ${n(u.outputTokens)}`
-          : `${n(t.attrs.chunks)} chunks, ${n(t.attrs.embedTokens)} tok embedded`;
-      const when = t.startedAt.replace("T", " ").slice(0, 19);
-      const label = t.input.length > 48 ? `${t.input.slice(0, 47)}…` : t.input;
-      return `${when}  ${t.id.slice(0, 8)}  ${t.kind.padEnd(6)} ${ms(t.durationMs).padStart(9)}  ${tokens.padEnd(36)}  ${label}${t.error ? "  [error]" : ""}`;
-    })
-    .join("\n");
+  return traces.map(formatListRow).join("\n");
 };

@@ -27,8 +27,8 @@ describe("fixedSizeSpans", () => {
     for (let i = 1; i < spans.length; i++) {
       const prev = spans[i - 1]!;
       const cur = spans[i]!;
-      expect(cur.start).toBeLessThan(prev.end); // overlap exists
-      expect(cur.start).toBeGreaterThan(prev.start); // progress is made
+      expect(cur.start).toBeLessThan(prev.end);
+      expect(cur.start).toBeGreaterThan(prev.start);
     }
     expect(spans.at(-1)!.end).toBe(text.length);
   });
