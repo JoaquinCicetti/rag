@@ -54,6 +54,18 @@ const describeGenerate = (attrs: Attrs): Array<string> => {
   return lines;
 };
 
+const describeLlm = (attrs: Attrs): Array<string> => {
+  const toolCalls = (attrs.toolCalls as Array<string> | undefined) ?? [];
+  const action = toolCalls.length > 0 ? `→ ${toolCalls.join(", ")}` : "→ text";
+  const step = typeof attrs.step === "number" ? count(attrs.step) : String(attrs.step ?? "?");
+  return [`step ${step}  in ${count(attrs.inputTokens)} out ${count(attrs.outputTokens)} tok  ${action}`];
+};
+
+const describeTool = (attrs: Attrs): Array<string> => {
+  const outcome = attrs.ok === false ? "  failed" : "";
+  return [`${attrs.tool ?? ""} ${JSON.stringify(attrs.arguments ?? {})}${outcome}`];
+};
+
 const describe = (span: SpanRecord): Array<string> => {
   const attrs = span.attrs;
   switch (span.name) {
@@ -65,6 +77,10 @@ const describe = (span: SpanRecord): Array<string> => {
       return describeContext(attrs);
     case "generate":
       return describeGenerate(attrs);
+    case "llm":
+      return describeLlm(attrs);
+    case "tool":
+      return describeTool(attrs);
     case "chunk":
       return [`${count(attrs.chunks)} chunks, avg ${count(attrs.avgChars)} chars`];
     case "upsert":
@@ -104,10 +120,12 @@ export const usageOf = (trace: TraceRecord): Attrs => trace.spans.find((span) =>
 
 const formatListRow = (trace: TraceRecord): string => {
   const usage = usageOf(trace);
-  const tokens =
-    trace.kind === "ask"
-      ? `in ${count(usage.inputTokens)} (cached ${count(usage.cachedInputTokens)}) out ${count(usage.outputTokens)}`
-      : `${count(trace.attrs.chunks)} chunks, ${count(trace.attrs.embedTokens)} tok embedded`;
+  const summaries: Record<TraceRecord["kind"], string> = {
+    ask: `in ${count(usage.inputTokens)} (cached ${count(usage.cachedInputTokens)}) out ${count(usage.outputTokens)}`,
+    ingest: `${count(trace.attrs.chunks)} chunks, ${count(trace.attrs.embedTokens)} tok embedded`,
+    papers: `${count(trace.attrs.downloaded)} paper(s), ${count(trace.attrs.steps)} step(s)`,
+  };
+  const tokens = summaries[trace.kind];
   const when = trace.startedAt.replace("T", " ").slice(0, 19);
   const failed = trace.error ? "  [error]" : "";
   return `${when}  ${trace.id.slice(0, 8)}  ${trace.kind.padEnd(6)} ${millis(trace.durationMs).padStart(9)}  ${tokens.padEnd(36)}  ${truncate(trace.input, 48)}${failed}`;

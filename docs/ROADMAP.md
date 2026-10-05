@@ -17,9 +17,9 @@ Estado: `[x]` hecho · `[~]` en progreso · `[ ]` pendiente. Cada paso tiene sus
 
 Tecnologías: Bun + TypeScript + Docker + Qdrant + Ollama. No usar LangChain/LlamaIndex todavía: implementar el pipeline manualmente para entender cada pieza.
 
-## 2. Ingestion y chunking serio — `[ ]`
+## 2. Ingestion y chunking serio — `[~]` ([agente de papers](steps/02-paper-agent.md))
 
-- [ ] Soportar Markdown, TXT, PDF, HTML y DOCX.
+- [~] Soportar Markdown, TXT, PDF, HTML y DOCX. (MD, TXT y PDF listos)
 - [ ] Comparar fixed-size chunking.
 - [ ] Comparar chunking por párrafos.
 - [ ] Comparar chunking por headings/secciones.

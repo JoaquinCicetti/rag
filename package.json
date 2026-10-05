@@ -15,6 +15,7 @@
     "ingest": "bun src/cli/ingest.ts",
     "ask": "bun src/cli/ask.ts",
     "traces": "bun src/cli/traces.ts",
+    "papers": "bun src/cli/papers.ts",
     "dev": "bun --watch src/api/server.ts",
     "start": "bun src/api/server.ts",
     "test": "bun test",
@@ -23,7 +24,8 @@
   },
   "dependencies": {
     "@qdrant/js-client-rest": "^1.13.0",
-    "hono": "^4.7.0"
+    "hono": "^4.7.0",
+    "unpdf": "^1.8.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

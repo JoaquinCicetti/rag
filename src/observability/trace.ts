@@ -25,7 +25,7 @@ export interface SpanRecord {
 
 export interface TraceRecord {
   id: string;
-  kind: "ask" | "ingest";
+  kind: "ask" | "ingest" | "papers";
   input: string;
   startedAt: string;
   durationMs: number;

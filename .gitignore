@@ -3,6 +3,7 @@ node_modules/
 .env.*.local
 data/uploads/*
 data/traces/
+data/papers/
 !data/uploads/.gitkeep
 dist/
 *.log
