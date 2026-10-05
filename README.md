@@ -31,6 +31,15 @@ curl -s localhost:3000/traces/<id>        # same over the API (/ask returns trac
 
 How to read the `generate` span: `load` is the model cold start (Ollama unloads idle models), `prompt` is the tokens the LLM read (`cached` = prefix reused from the KV cache, usually just the system prompt because the retrieved context changes per question), `output` is the generated tokens and decode speed. Disable with `TRACES_ENABLED=false`.
 
+## Paper agent
+
+An LLM tool-calling agent that searches open-access papers (OpenAlex), finds a legal PDF (OpenAlex, Unpaywall, arXiv, Europe PMC) and saves it to `data/papers/`. Set `CONTACT_EMAIL` to enable Unpaywall.
+
+```bash
+bun run papers "retrieval augmented generation" --max 5 --ingest
+bun run traces <id>                       # llm steps and tool calls
+```
+
 ## Docs
 
 - [Roadmap](docs/ROADMAP.md): the 11-step plan and current status.

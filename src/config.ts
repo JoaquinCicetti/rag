@@ -39,6 +39,11 @@ export const config = {
   api: {
     port: envInt("PORT", 3000),
   },
+  papers: {
+    dir: env("PAPERS_DIR", "data/papers"),
+    contactEmail: env("CONTACT_EMAIL", ""),
+    maxSteps: envInt("PAPERS_MAX_STEPS", 12),
+  },
   traces: {
     enabled: env("TRACES_ENABLED", "true") !== "false",
     dir: env("TRACE_DIR", "data/traces"),
