@@ -1,4 +1,3 @@
-/** Sentence the model must use verbatim when the context does not answer the question. */
 export const NO_INFO = "No hay suficiente información en los documentos para responder.";
 
 export const SYSTEM_PROMPT = `Sos un asistente que responde preguntas usando únicamente el CONTEXTO provisto.

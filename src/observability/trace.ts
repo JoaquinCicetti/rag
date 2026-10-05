@@ -4,11 +4,19 @@ import { config } from "../config.ts";
 
 export type Attrs = Record<string, unknown>;
 
+export type SpanFn<T> = (span: Span) => Promise<T> | T;
+
+export interface ReadTracesOptions {
+  limit?: number;
+  dir?: string;
+}
+
+const DEFAULT_TRACE_LIMIT = 20;
+const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
 export interface SpanRecord {
   name: string;
-  /** Nesting level, 0 = direct child of the trace. */
   depth: number;
-  /** Milliseconds since the trace started. */
   startMs: number;
   durationMs: number;
   attrs: Attrs;
@@ -18,13 +26,11 @@ export interface SpanRecord {
 export interface TraceRecord {
   id: string;
   kind: "ask" | "ingest";
-  /** The question for ask, the path for ingest. */
   input: string;
   startedAt: string;
   durationMs: number;
   attrs: Attrs;
-  /** Spans in start order; `depth` encodes the tree. */
-  spans: SpanRecord[];
+  spans: Array<SpanRecord>;
   error?: string;
 }
 
@@ -35,7 +41,7 @@ export class Span {
     private readonly trace: Trace,
     name: string,
     depth: number,
-    attrs: Attrs,
+    attrs?: Attrs,
   ) {
     this.record = { name, depth, startMs: trace.elapsed(), durationMs: 0, attrs: { ...attrs } };
   }
@@ -45,22 +51,17 @@ export class Span {
     return this;
   }
 
-  /** Child span, nested one level under this one. */
-  span<T>(name: string, fn: (span: Span) => Promise<T> | T, attrs: Attrs = {}): Promise<T> {
+  span<T>(name: string, fn: SpanFn<T>, attrs?: Attrs): Promise<T> {
     return this.trace.run(name, this.record.depth + 1, fn, attrs);
   }
 }
 
-/**
- * A single run of `ask` or `ingest`: a flat list of timed spans with attributes.
- * Passed explicitly through the pipeline (no globals) and written as one JSONL line.
- */
 export class Trace {
   readonly id = crypto.randomUUID();
   readonly startedAt = new Date();
   readonly attrs: Attrs = {};
-  private readonly t0 = performance.now();
-  private readonly spans: SpanRecord[] = [];
+  private readonly startedAtMs = performance.now();
+  private readonly spans: Array<SpanRecord> = [];
   private error?: string;
 
   constructor(
@@ -69,7 +70,7 @@ export class Trace {
   ) {}
 
   elapsed(): number {
-    return performance.now() - this.t0;
+    return performance.now() - this.startedAtMs;
   }
 
   set(attrs: Attrs): this {
@@ -77,24 +78,23 @@ export class Trace {
     return this;
   }
 
-  fail(err: unknown): this {
-    this.error = err instanceof Error ? err.message : String(err);
+  fail(error: unknown): this {
+    this.error = errorMessage(error);
     return this;
   }
 
-  span<T>(name: string, fn: (span: Span) => Promise<T> | T, attrs: Attrs = {}): Promise<T> {
+  span<T>(name: string, fn: SpanFn<T>, attrs?: Attrs): Promise<T> {
     return this.run(name, 0, fn, attrs);
   }
 
-  /** @internal used by Span for nesting. */
-  async run<T>(name: string, depth: number, fn: (span: Span) => Promise<T> | T, attrs: Attrs): Promise<T> {
+  async run<T>(name: string, depth: number, fn: SpanFn<T>, attrs?: Attrs): Promise<T> {
     const span = new Span(this, name, depth, attrs);
     this.spans.push(span.record);
     try {
       return await fn(span);
-    } catch (e) {
-      span.record.error = e instanceof Error ? e.message : String(e);
-      throw e;
+    } catch (error) {
+      span.record.error = errorMessage(error);
+      throw error;
     } finally {
       span.record.durationMs = this.elapsed() - span.record.startMs;
     }
@@ -116,39 +116,37 @@ export class Trace {
 
 const fileFor = (dir: string, date: Date): string => join(dir, `${date.toISOString().slice(0, 10)}.jsonl`);
 
-/** Append one trace as a JSONL line to <dir>/YYYY-MM-DD.jsonl. No-op when tracing is disabled. */
 export const writeTrace = async (record: TraceRecord, dir = config.traces.dir): Promise<void> => {
   if (!config.traces.enabled) return;
   await mkdir(dir, { recursive: true });
   await appendFile(fileFor(dir, new Date(record.startedAt)), `${JSON.stringify(record)}\n`);
 };
 
-/** Most recent traces first. Reads day files newest-first until `limit` is reached. */
-export const readTraces = async (opts: { limit?: number; dir?: string } = {}): Promise<TraceRecord[]> => {
-  const dir = opts.dir ?? config.traces.dir;
-  const limit = opts.limit ?? 20;
-  const files = await readdir(dir).catch(() => [] as string[]);
-  const out: TraceRecord[] = [];
-  for (const f of files.filter((f) => f.endsWith(".jsonl")).sort().reverse()) {
-    const lines = (await readFile(join(dir, f), "utf8")).split("\n").filter(Boolean).reverse();
+export const readTraces = async (options?: ReadTracesOptions): Promise<Array<TraceRecord>> => {
+  const dir = options?.dir ?? config.traces.dir;
+  const limit = options?.limit ?? DEFAULT_TRACE_LIMIT;
+  const files = await readdir(dir).catch((): Array<string> => []);
+  const dayFiles = files.filter((file) => file.endsWith(".jsonl")).sort().reverse();
+  const traces: Array<TraceRecord> = [];
+  for (const dayFile of dayFiles) {
+    const content = await readFile(join(dir, dayFile), "utf8");
+    const lines = content.split("\n").filter(Boolean).reverse();
     for (const line of lines) {
-      out.push(JSON.parse(line) as TraceRecord);
-      if (out.length >= limit) return out;
+      traces.push(JSON.parse(line) as TraceRecord);
+      if (traces.length >= limit) return traces;
     }
   }
-  return out;
+  return traces;
 };
 
-/** Find a trace by full id or unique prefix. */
 export const findTrace = async (idPrefix: string, dir?: string): Promise<TraceRecord | undefined> => {
-  const all = await readTraces({ limit: Number.POSITIVE_INFINITY, dir });
-  return all.find((t) => t.id.startsWith(idPrefix));
+  const traces = await readTraces({ limit: Number.POSITIVE_INFINITY, dir });
+  return traces.find((trace) => trace.id.startsWith(idPrefix));
 };
 
-/** Run `fn` inside a span of `parent`, or untraced (throwaway span) when there is no parent. */
 export const inSpan = <T>(
   parent: Trace | Span | undefined,
   name: string,
-  fn: (span: Span) => Promise<T> | T,
-  attrs: Attrs = {},
+  fn: SpanFn<T>,
+  attrs?: Attrs,
 ): Promise<T> => (parent ?? new Trace("ask", "")).span(name, fn, attrs);

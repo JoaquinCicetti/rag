@@ -6,14 +6,10 @@ export interface ChatMessage {
 }
 
 export interface LLMUsage {
-  /** Total prompt tokens, cached ones included. */
   inputTokens?: number;
-  /** Prompt tokens served from the KV / prompt cache. */
   cachedInputTokens?: number;
-  /** Prompt tokens written to the cache (Anthropic only). */
   cacheWriteTokens?: number;
   outputTokens?: number;
-  /** Ollama only: model load, prompt processing and generation time. */
   loadMs?: number;
   promptEvalMs?: number;
   evalMs?: number;
@@ -25,16 +21,25 @@ export interface LLMResult {
   usage?: LLMUsage;
 }
 
+export interface ChatOptions {
+  temperature?: number;
+}
+
 export interface LLM {
   readonly model: string;
-  chat(messages: ChatMessage[], opts?: { temperature?: number }): Promise<LLMResult>;
+  chat(messages: Array<ChatMessage>, options?: ChatOptions): Promise<LLMResult>;
+}
+
+export interface LLMConnection {
+  url?: string;
+  apiKey?: string;
+  model?: string;
 }
 
 export interface OllamaTimings {
   prompt_eval_count?: number;
   prompt_eval_cached_count?: number;
   eval_count?: number;
-  /** Durations are in nanoseconds. */
   load_duration?: number;
   prompt_eval_duration?: number;
   eval_duration?: number;
@@ -42,43 +47,76 @@ export interface OllamaTimings {
 
 interface OllamaChatResponse extends OllamaTimings {
   model: string;
-  message: { role: string; content: string };
+  message: ChatMessage;
 }
 
-const nsToMs = (ns?: number): number | undefined => (ns === undefined ? undefined : ns / 1e6);
+interface AnthropicContentBlock {
+  type: string;
+  text?: string;
+}
 
-export const mapOllamaUsage = (r: OllamaTimings): LLMUsage => ({
-  inputTokens: r.prompt_eval_count,
-  cachedInputTokens: r.prompt_eval_cached_count,
-  outputTokens: r.eval_count,
-  loadMs: nsToMs(r.load_duration),
-  promptEvalMs: nsToMs(r.prompt_eval_duration),
-  evalMs: nsToMs(r.eval_duration),
+interface AnthropicUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+}
+
+interface AnthropicResponse {
+  model: string;
+  content: Array<AnthropicContentBlock>;
+  usage?: AnthropicUsage;
+}
+
+const nanosToMs = (ns?: number): number | undefined => (ns === undefined ? undefined : ns / 1e6);
+
+export const mapOllamaUsage = (timings: OllamaTimings): LLMUsage => ({
+  inputTokens: timings.prompt_eval_count,
+  cachedInputTokens: timings.prompt_eval_cached_count,
+  outputTokens: timings.eval_count,
+  loadMs: nanosToMs(timings.load_duration),
+  promptEvalMs: nanosToMs(timings.prompt_eval_duration),
+  evalMs: nanosToMs(timings.eval_duration),
 });
 
-/** Ollama chat via /api/chat, non-streaming. */
+const mapAnthropicUsage = (usage: AnthropicUsage): LLMUsage => {
+  const cacheRead = usage.cache_read_input_tokens ?? 0;
+  const cacheWrite = usage.cache_creation_input_tokens ?? 0;
+  return {
+    inputTokens: usage.input_tokens + cacheRead + cacheWrite,
+    cachedInputTokens: cacheRead,
+    cacheWriteTokens: cacheWrite,
+    outputTokens: usage.output_tokens,
+  };
+};
+
+const failedResponse = async (provider: string, response: Response): Promise<Error> => {
+  const body = await response.text();
+  return new Error(`${provider} failed (${response.status}): ${body}`);
+};
+
 export class OllamaLLM implements LLM {
   readonly model: string;
   private readonly url: string;
 
-  constructor(opts?: { url?: string; model?: string }) {
-    this.url = opts?.url ?? config.ollama.url;
-    this.model = opts?.model ?? config.llm.model;
+  constructor(connection?: LLMConnection) {
+    this.url = connection?.url ?? config.ollama.url;
+    this.model = connection?.model ?? config.llm.model;
   }
 
-  async chat(messages: ChatMessage[], opts: { temperature?: number } = {}): Promise<LLMResult> {
-    const res = await fetch(`${this.url}/api/chat`, {
+  async chat(messages: Array<ChatMessage>, options?: ChatOptions): Promise<LLMResult> {
+    const response = await fetch(`${this.url}/api/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         model: this.model,
         messages,
         stream: false,
-        options: { temperature: opts.temperature ?? 0 },
+        options: { temperature: options?.temperature ?? 0 },
       }),
     });
-    if (!res.ok) throw new Error(`ollama chat failed (${res.status}): ${await res.text()}`);
-    const data = (await res.json()) as OllamaChatResponse;
+    if (!response.ok) throw await failedResponse("ollama chat", response);
+    const data = (await response.json()) as OllamaChatResponse;
     return {
       text: data.message.content.trim(),
       model: data.model,
@@ -87,21 +125,20 @@ export class OllamaLLM implements LLM {
   }
 }
 
-/** Anthropic Messages API, plain fetch (no SDK) to keep the pipeline transparent. */
 export class AnthropicLLM implements LLM {
   readonly model: string;
   private readonly apiKey: string;
 
-  constructor(opts?: { apiKey?: string; model?: string }) {
-    this.apiKey = opts?.apiKey ?? config.llm.anthropicApiKey;
-    this.model = opts?.model ?? config.llm.anthropicModel;
+  constructor(connection?: LLMConnection) {
+    this.apiKey = connection?.apiKey ?? config.llm.anthropicApiKey;
+    this.model = connection?.model ?? config.llm.anthropicModel;
     if (!this.apiKey) throw new Error("ANTHROPIC_API_KEY is required when LLM_PROVIDER=anthropic");
   }
 
-  async chat(messages: ChatMessage[], opts: { temperature?: number } = {}): Promise<LLMResult> {
-    const system = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
-    const rest = messages.filter((m) => m.role !== "system");
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
+  async chat(messages: Array<ChatMessage>, options?: ChatOptions): Promise<LLMResult> {
+    const system = messages.filter((message) => message.role === "system").map((message) => message.content).join("\n\n");
+    const conversation = messages.filter((message) => message.role !== "system");
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -111,33 +148,17 @@ export class AnthropicLLM implements LLM {
       body: JSON.stringify({
         model: this.model,
         max_tokens: 1024,
-        temperature: opts.temperature ?? 0,
+        temperature: options?.temperature ?? 0,
         ...(system ? { system } : {}),
-        messages: rest.map((m) => ({ role: m.role, content: m.content })),
+        messages: conversation.map((message) => ({ role: message.role, content: message.content })),
       }),
     });
-    if (!res.ok) throw new Error(`anthropic failed (${res.status}): ${await res.text()}`);
-    const data = (await res.json()) as {
-      model: string;
-      content: Array<{ type: string; text?: string }>;
-      usage?: {
-        input_tokens: number;
-        output_tokens: number;
-        cache_read_input_tokens?: number;
-        cache_creation_input_tokens?: number;
-      };
-    };
-    const u = data.usage;
+    if (!response.ok) throw await failedResponse("anthropic", response);
+    const data = (await response.json()) as AnthropicResponse;
     return {
-      text: data.content.filter((c) => c.type === "text").map((c) => c.text ?? "").join("").trim(),
+      text: data.content.filter((block) => block.type === "text").map((block) => block.text ?? "").join("").trim(),
       model: data.model,
-      // Anthropic's input_tokens excludes cache reads/writes; normalize to "total prompt tokens".
-      usage: u && {
-        inputTokens: u.input_tokens + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0),
-        cachedInputTokens: u.cache_read_input_tokens ?? 0,
-        cacheWriteTokens: u.cache_creation_input_tokens ?? 0,
-        outputTokens: u.output_tokens,
-      },
+      usage: data.usage && mapAnthropicUsage(data.usage),
     };
   }
 }

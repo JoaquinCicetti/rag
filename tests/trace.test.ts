@@ -87,7 +87,6 @@ describe("Trace", () => {
 
 describe("mapOllamaUsage", () => {
   test("maps counts and converts ns to ms", () => {
-    // Real /api/chat response fields from Ollama 0.33 (warm run, cached prefix).
     const u = mapOllamaUsage({
       prompt_eval_count: 1517,
       prompt_eval_cached_count: 1516,

@@ -1,14 +1,10 @@
-/**
- * Central configuration. Every value has a default so the pipeline runs
- * with just `docker compose up` + a native Ollama; `.env` overrides.
- */
 const env = (key: string, fallback: string): string => {
-  const v = process.env[key];
-  return v === undefined || v === "" ? fallback : v;
+  const value = process.env[key];
+  return value === undefined || value === "" ? fallback : value;
 };
 const envInt = (key: string, fallback: number): number => {
-  const v = Number.parseInt(env(key, String(fallback)), 10);
-  return Number.isFinite(v) ? v : fallback;
+  const parsed = Number.parseInt(env(key, String(fallback)), 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
 };
 
 export const config = {
