@@ -1,3 +1,5 @@
+import type { LLMUsage } from "./generation/llm.ts";
+
 /** A source document as loaded from disk (or later: S3, upload, etc.). */
 export interface Document {
   /** Stable id derived from the source path. */
@@ -46,11 +48,16 @@ export interface Citation {
 }
 
 export interface Answer {
+  /** Id of the trace written for this run (`bun run traces <id>`). */
+  traceId: string;
   question: string;
   answer: string;
   citations: Citation[];
   retrieved: RetrievedChunk[];
   model: string;
+  /** Token usage reported by the LLM provider, if any. */
+  usage?: LLMUsage;
+  context?: { chars: number; budget: number; included: number; dropped: number };
   timings: {
     embedMs: number;
     searchMs: number;

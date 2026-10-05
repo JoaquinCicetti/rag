@@ -18,6 +18,19 @@ curl -s localhost:3000/health
 curl -s localhost:3000/ask -H 'content-type: application/json' -d '{"question":"What is recall@k?"}'
 ```
 
+## Tracing
+
+Every `ask` and `ingest` writes a trace (one JSONL line) to `data/traces/YYYY-MM-DD.jsonl`.
+
+```bash
+bun run ask "¿Qué es un chunk?" --trace   # answer + span tree
+bun run traces                            # last 20 runs: latency, tokens in/cached/out
+bun run traces <id> [--prompt] [--json]   # one run; --prompt dumps the exact messages sent
+curl -s localhost:3000/traces/<id>        # same over the API (/ask returns traceId)
+```
+
+How to read the `generate` span: `load` is the model cold start (Ollama unloads idle models), `prompt` is the tokens the LLM read (`cached` = prefix reused from the KV cache, usually just the system prompt because the retrieved context changes per question), `output` is the generated tokens and decode speed. Disable with `TRACES_ENABLED=false`.
+
 ## Docs
 
 - [Roadmap](docs/ROADMAP.md): the 11-step plan and current status.

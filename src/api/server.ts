@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { config } from "../config.ts";
 import { createEmbedder } from "../embeddings/ollama.ts";
 import { createLLM } from "../generation/llm.ts";
+import { findTrace, readTraces } from "../observability/trace.ts";
 import { ask } from "../pipeline/ask.ts";
 import { ingestPath } from "../pipeline/ingest.ts";
 import { createVectorStore } from "../vectorstore/qdrant.ts";
@@ -56,6 +57,16 @@ app.post("/ingest", async (c) => {
   } catch (e) {
     return c.json({ error: (e as Error).message }, 500);
   }
+});
+
+app.get("/traces", async (c) => {
+  const limit = Number(c.req.query("limit") ?? 20);
+  return c.json(await readTraces({ limit: Number.isFinite(limit) && limit > 0 ? limit : 20 }));
+});
+
+app.get("/traces/:id", async (c) => {
+  const trace = await findTrace(c.req.param("id"));
+  return trace ? c.json(trace) : c.json({ error: "trace not found" }, 404);
 });
 
 app.onError((err, c) => c.json({ error: err.message }, 500));

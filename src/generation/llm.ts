@@ -5,10 +5,24 @@ export interface ChatMessage {
   content: string;
 }
 
+export interface LLMUsage {
+  /** Total prompt tokens, cached ones included. */
+  inputTokens?: number;
+  /** Prompt tokens served from the KV / prompt cache. */
+  cachedInputTokens?: number;
+  /** Prompt tokens written to the cache (Anthropic only). */
+  cacheWriteTokens?: number;
+  outputTokens?: number;
+  /** Ollama only: model load, prompt processing and generation time. */
+  loadMs?: number;
+  promptEvalMs?: number;
+  evalMs?: number;
+}
+
 export interface LLMResult {
   text: string;
   model: string;
-  usage?: { inputTokens?: number; outputTokens?: number };
+  usage?: LLMUsage;
 }
 
 export interface LLM {
@@ -16,12 +30,31 @@ export interface LLM {
   chat(messages: ChatMessage[], opts?: { temperature?: number }): Promise<LLMResult>;
 }
 
-interface OllamaChatResponse {
+export interface OllamaTimings {
+  prompt_eval_count?: number;
+  prompt_eval_cached_count?: number;
+  eval_count?: number;
+  /** Durations are in nanoseconds. */
+  load_duration?: number;
+  prompt_eval_duration?: number;
+  eval_duration?: number;
+}
+
+interface OllamaChatResponse extends OllamaTimings {
   model: string;
   message: { role: string; content: string };
-  prompt_eval_count?: number;
-  eval_count?: number;
 }
+
+const nsToMs = (ns?: number): number | undefined => (ns === undefined ? undefined : ns / 1e6);
+
+export const mapOllamaUsage = (r: OllamaTimings): LLMUsage => ({
+  inputTokens: r.prompt_eval_count,
+  cachedInputTokens: r.prompt_eval_cached_count,
+  outputTokens: r.eval_count,
+  loadMs: nsToMs(r.load_duration),
+  promptEvalMs: nsToMs(r.prompt_eval_duration),
+  evalMs: nsToMs(r.eval_duration),
+});
 
 /** Ollama chat via /api/chat, non-streaming. */
 export class OllamaLLM implements LLM {
@@ -49,7 +82,7 @@ export class OllamaLLM implements LLM {
     return {
       text: data.message.content.trim(),
       model: data.model,
-      usage: { inputTokens: data.prompt_eval_count, outputTokens: data.eval_count },
+      usage: mapOllamaUsage(data),
     };
   }
 }
@@ -87,12 +120,24 @@ export class AnthropicLLM implements LLM {
     const data = (await res.json()) as {
       model: string;
       content: Array<{ type: string; text?: string }>;
-      usage?: { input_tokens: number; output_tokens: number };
+      usage?: {
+        input_tokens: number;
+        output_tokens: number;
+        cache_read_input_tokens?: number;
+        cache_creation_input_tokens?: number;
+      };
     };
+    const u = data.usage;
     return {
       text: data.content.filter((c) => c.type === "text").map((c) => c.text ?? "").join("").trim(),
       model: data.model,
-      usage: { inputTokens: data.usage?.input_tokens, outputTokens: data.usage?.output_tokens },
+      // Anthropic's input_tokens excludes cache reads/writes; normalize to "total prompt tokens".
+      usage: u && {
+        inputTokens: u.input_tokens + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0),
+        cachedInputTokens: u.cache_read_input_tokens ?? 0,
+        cacheWriteTokens: u.cache_creation_input_tokens ?? 0,
+        outputTokens: u.output_tokens,
+      },
     };
   }
 }

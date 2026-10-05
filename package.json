@@ -14,6 +14,7 @@
     "models:pull": "ollama pull bge-m3 && ollama pull llama3.1",
     "ingest": "bun src/cli/ingest.ts",
     "ask": "bun src/cli/ask.ts",
+    "traces": "bun src/cli/traces.ts",
     "dev": "bun --watch src/api/server.ts",
     "start": "bun src/api/server.ts",
     "test": "bun test",
