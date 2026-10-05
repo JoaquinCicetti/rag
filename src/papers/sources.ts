@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { config } from "../config.ts";
+import { findOpenPmcids, fullTextXmlUrl, jatsToMarkdown } from "./europepmc.ts";
 
 export interface PaperHit {
   doi: string;
@@ -9,6 +10,7 @@ export interface PaperHit {
   authors: Array<string>;
   abstract: string;
   pdfUrls: Array<string>;
+  pmcid?: string;
 }
 
 export interface DownloadedPaper {
@@ -51,8 +53,14 @@ interface OpenAlexWork {
   authorships?: Array<OpenAlexAuthorship>;
   abstract_inverted_index?: Record<string, Array<number>> | null;
   best_oa_location?: OpenAlexLocation | null;
+  locations?: Array<OpenAlexLocation>;
   open_access?: OpenAlexOpenAccess;
   ids?: OpenAlexIds;
+}
+
+interface FullText {
+  url: string;
+  markdown: string;
 }
 
 interface OpenAlexSearchResponse {
@@ -70,7 +78,7 @@ interface UnpaywallResponse {
 
 const OPENALEX_URL = "https://api.openalex.org/works";
 const UNPAYWALL_URL = "https://api.unpaywall.org/v2";
-const OPENALEX_FIELDS = "doi,display_name,publication_year,authorships,abstract_inverted_index,best_oa_location,open_access,ids";
+const OPENALEX_FIELDS = "doi,display_name,publication_year,authorships,abstract_inverted_index,best_oa_location,locations,open_access,ids";
 const ABSTRACT_MAX_CHARS = 400;
 const MAX_AUTHORS = 3;
 const PDF_MAGIC = "%PDF";
@@ -91,11 +99,6 @@ const arxivPdfUrl = (doi: string): string | undefined => {
   return arxivId ? `https://arxiv.org/pdf/${arxivId}` : undefined;
 };
 
-const europePmcPdfUrl = (pmcid?: string): string | undefined => {
-  const pmcNumber = pmcid?.match(/PMC\d+/i)?.[0];
-  return pmcNumber ? `https://europepmc.org/articles/${pmcNumber.toUpperCase()}?pdf=render` : undefined;
-};
-
 const uniqueUrls = (urls: Array<string | null | undefined>): Array<string> => [
   ...new Set(urls.filter((url): url is string => Boolean(url))),
 ];
@@ -113,8 +116,8 @@ export const parseOpenAlexWork = (work: OpenAlexWork): PaperHit | undefined => {
     pdfUrls: uniqueUrls([
       work.best_oa_location?.pdf_url,
       work.open_access?.oa_url,
+      ...(work.locations ?? []).map((location) => location.pdf_url),
       arxivPdfUrl(doi),
-      europePmcPdfUrl(work.ids?.pmcid),
     ]),
   };
 };
@@ -130,6 +133,9 @@ export const slugify = (text: string): string =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
     .slice(0, 80);
+
+export const isRetrievable = (hit: PaperHit): boolean =>
+  Boolean(hit.pmcid) || hit.pdfUrls.some((url) => url.startsWith("https://arxiv.org/"));
 
 export const isPdf = (bytes: Uint8Array): boolean => new TextDecoder().decode(bytes.slice(0, 4)) === PDF_MAGIC;
 
@@ -151,26 +157,52 @@ export class OpenAccessSources implements PaperSources {
       ...(this.contactEmail && { mailto: this.contactEmail }),
     });
     const data = await this.getJson<OpenAlexSearchResponse>(`${OPENALEX_URL}?${params}`);
-    return (data?.results ?? []).map(parseOpenAlexWork).filter((hit): hit is PaperHit => hit !== undefined);
+    const hits = (data?.results ?? []).map(parseOpenAlexWork).filter((hit): hit is PaperHit => hit !== undefined);
+    const annotated = await this.withPmcids(hits);
+    return annotated.sort((left, right) => Number(isRetrievable(right)) - Number(isRetrievable(left)));
   }
 
   async lookup(doi: string): Promise<PaperHit | undefined> {
     const work = await this.getJson<OpenAlexWork>(`${OPENALEX_URL}/doi:${stripDoiPrefix(doi)}?select=${OPENALEX_FIELDS}`);
-    return work ? parseOpenAlexWork(work) : undefined;
+    const hit = work && parseOpenAlexWork(work);
+    if (!hit) return undefined;
+    const [annotated] = await this.withPmcids([hit]);
+    return annotated;
+  }
+
+  private async withPmcids(hits: Array<PaperHit>): Promise<Array<PaperHit>> {
+    const pmcidByDoi = await findOpenPmcids(hits.map((hit) => hit.doi), (url) => this.getJson(url));
+    return hits.map((hit) => ({ ...hit, pmcid: pmcidByDoi.get(hit.doi) }));
   }
 
   async download(hit: PaperHit): Promise<DownloadedPaper | undefined> {
-    const unpaywallUrls = await this.unpaywallUrls(hit.doi);
-    const candidates = uniqueUrls([...hit.pdfUrls, ...unpaywallUrls]);
-    const path = join(this.dir, `${hit.year ?? "n.d"}-${slugify(hit.title)}.pdf`);
+    const basePath = join(this.dir, `${hit.year ?? "n.d"}-${slugify(hit.title)}`);
     await mkdir(this.dir, { recursive: true });
-    for (const url of candidates) {
+
+    const fullText = hit.pmcid ? await this.europePmcFullText(hit.pmcid) : undefined;
+    if (fullText) {
+      const path = `${basePath}.md`;
+      await Bun.write(path, fullText.markdown);
+      return { doi: hit.doi, title: hit.title, path, url: fullText.url };
+    }
+
+    const unpaywallUrls = await this.unpaywallUrls(hit.doi);
+    for (const url of uniqueUrls([...hit.pdfUrls, ...unpaywallUrls])) {
       const bytes = await this.fetchPdf(url);
       if (!bytes) continue;
+      const path = `${basePath}.pdf`;
       await Bun.write(path, bytes);
       return { doi: hit.doi, title: hit.title, path, url };
     }
     return undefined;
+  }
+
+  private async europePmcFullText(pmcid: string): Promise<FullText | undefined> {
+    const url = fullTextXmlUrl(pmcid);
+    const response = await this.fetchOk(url);
+    const xml = await response?.text();
+    const markdown = xml ? jatsToMarkdown(xml) : "";
+    return markdown ? { url, markdown } : undefined;
   }
 
   private async unpaywallUrls(doi: string): Promise<Array<string>> {
@@ -180,21 +212,22 @@ export class OpenAccessSources implements PaperSources {
   }
 
   private async fetchPdf(url: string): Promise<Uint8Array | undefined> {
-    try {
-      const response = await fetch(url, { headers: this.headers(), signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-      if (!response.ok) return undefined;
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      return isPdf(bytes) ? bytes : undefined;
-    } catch {
-      return undefined;
-    }
+    const response = await this.fetchOk(url);
+    const buffer = await response?.arrayBuffer().catch(() => undefined);
+    const bytes = buffer && new Uint8Array(buffer);
+    return bytes && isPdf(bytes) ? bytes : undefined;
   }
 
   private async getJson<T>(url: string): Promise<T | undefined> {
+    const response = await this.fetchOk(url);
+    const data = await response?.json().catch(() => undefined);
+    return data as T | undefined;
+  }
+
+  private async fetchOk(url: string): Promise<Response | undefined> {
     try {
       const response = await fetch(url, { headers: this.headers(), signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-      if (!response.ok) return undefined;
-      return (await response.json()) as T;
+      return response.ok ? response : undefined;
     } catch {
       return undefined;
     }

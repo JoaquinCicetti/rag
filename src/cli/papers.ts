@@ -33,8 +33,8 @@ const report = await collectPapers(
   { maxPapers, log: console.log },
 );
 
-console.log(`\n${report.summary || "(no summary)"}\n`);
-console.log(`downloaded ${report.downloaded.length} paper(s) in ${report.steps} step(s) to ${config.papers.dir}`);
+console.log(`\ndownloaded ${report.downloaded.length}/${maxPapers} paper(s) in ${report.steps} step(s):`);
+for (const paper of report.downloaded) console.log(`  ${paper.path}  (${paper.doi})`);
 console.log(`trace ${report.traceId.slice(0, 8)}  (bun run traces ${report.traceId.slice(0, 8)})`);
 
 if (values.ingest && report.downloaded.length > 0) {

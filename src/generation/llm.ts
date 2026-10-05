@@ -152,6 +152,34 @@ const fromOllamaToolCalls = (calls: Array<OllamaToolCall>): Array<ToolCall> =>
     arguments: call.function.arguments,
   }));
 
+interface InlineToolCall {
+  name?: unknown;
+  parameters?: unknown;
+  arguments?: unknown;
+}
+
+const isToolArguments = (value: unknown): value is ToolArguments => typeof value === "object" && value !== null;
+
+const parseInlineCall = (json: string): InlineToolCall | undefined => {
+  try {
+    return JSON.parse(json) as InlineToolCall;
+  } catch {
+    return undefined;
+  }
+};
+
+export const parseInlineToolCalls = (text: string, tools: Array<ToolDefinition>): Array<ToolCall> => {
+  const toolNames = new Set(tools.map((tool) => tool.name));
+  const candidates = text.match(/\{\s*"name"\s*:[\s\S]*?\}\s*\}/g) ?? [];
+  return candidates
+    .map(parseInlineCall)
+    .flatMap((call, index) => {
+      const args = call?.parameters ?? call?.arguments;
+      const isKnownTool = typeof call?.name === "string" && toolNames.has(call.name);
+      return isKnownTool && isToolArguments(args) ? [{ id: `inline_${index}`, name: call!.name as string, arguments: args }] : [];
+    });
+};
+
 const toAnthropicBlocks = (message: ChatMessage): Array<AnthropicContentBlock> => {
   if (message.role === "tool") return [{ type: "tool_result", tool_use_id: message.toolCallId, content: message.content }];
   const textBlocks: Array<AnthropicContentBlock> = message.content ? [{ type: "text", text: message.content }] : [];
@@ -201,11 +229,14 @@ export class OllamaLLM implements LLM {
     });
     if (!response.ok) throw await failedResponse("ollama chat", response);
     const data = (await response.json()) as OllamaChatResponse;
+    const nativeCalls = data.message.tool_calls ? fromOllamaToolCalls(data.message.tool_calls) : [];
+    const inlineCalls = nativeCalls.length === 0 && options?.tools ? parseInlineToolCalls(data.message.content, options.tools) : [];
+    const toolCalls = [...nativeCalls, ...inlineCalls];
     return {
       text: data.message.content.trim(),
       model: data.model,
       usage: mapOllamaUsage(data),
-      ...(data.message.tool_calls && { toolCalls: fromOllamaToolCalls(data.message.tool_calls) }),
+      ...(toolCalls.length > 0 && { toolCalls }),
     };
   }
 }

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import type { ChatMessage, LLM, LLMResult } from "../src/generation/llm.ts";
+import { parseInlineToolCalls, type ChatMessage, type LLM, type LLMResult } from "../src/generation/llm.ts";
 import { collectPapers } from "../src/papers/agent.ts";
+import { jatsToMarkdown } from "../src/papers/europepmc.ts";
 import { isPdf, parseOpenAlexWork, parseUnpaywall, slugify, type PaperHit, type PaperSources } from "../src/papers/sources.ts";
 
 const HIT: PaperHit = {
@@ -47,12 +48,12 @@ describe("parseOpenAlexWork", () => {
       authorships: [{ author: { display_name: "A" } }, { author: { display_name: "B" } }],
       abstract_inverted_index: { world: [1], hello: [0] },
       best_oa_location: { pdf_url: "https://arxiv.org/pdf/2005.11401" },
-      ids: { pmcid: "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC123" },
+      locations: [{ pdf_url: "https://repo.example.org/rag.pdf" }, { pdf_url: null }],
     });
     expect(hit?.doi).toBe("10.48550/arxiv.2005.11401");
     expect(hit?.abstract).toBe("hello world");
     expect(hit?.authors).toEqual(["A", "B"]);
-    expect(hit?.pdfUrls).toEqual(["https://arxiv.org/pdf/2005.11401", "https://europepmc.org/articles/PMC123?pdf=render"]);
+    expect(hit?.pdfUrls).toEqual(["https://arxiv.org/pdf/2005.11401", "https://repo.example.org/rag.pdf"]);
   });
 
   test("skips works without doi", () => {
@@ -131,5 +132,34 @@ describe("collectPapers", () => {
     const llm = new ScriptedLLM([toolReply("search_papers", { query: "a" }), toolReply("search_papers", { query: "b" })]);
     const report = await collectPapers("rag", { llm, sources: fakeSources(true) }, { maxPapers: 3, maxSteps: 2 });
     expect(report.steps).toBe(2);
+  });
+});
+
+describe("parseInlineToolCalls", () => {
+  const tools = [{ name: "download_paper", description: "", parameters: {} }];
+
+  test("extracts tool calls that llama writes as text", () => {
+    const text = 'Now I will download it.\n\n{"name": "download_paper", "parameters": {"doi":"10.1021/acs.orglett.9b04060"}}';
+    expect(parseInlineToolCalls(text, tools)).toEqual([
+      { id: "inline_0", name: "download_paper", arguments: { doi: "10.1021/acs.orglett.9b04060" } },
+    ]);
+  });
+
+  test("ignores unknown tools and plain prose", () => {
+    expect(parseInlineToolCalls('{"name": "rm_rf", "parameters": {}}', tools)).toEqual([]);
+    expect(parseInlineToolCalls("I downloaded everything.", tools)).toEqual([]);
+  });
+});
+
+describe("jatsToMarkdown", () => {
+  test("turns JATS full text into markdown and drops references", () => {
+    const xml = `<article><front><article-title>Imidazoles &amp; more</article-title><abstract><title>Abstract</title><p>Short <italic>summary</italic>.</p></abstract></front>
+      <body><sec><title>1. Introduction</title><p>Text<xref ref-type="bibr">[1]</xref>.</p><fig><title>Figure</title><p>caption</p></fig></sec></body>
+      <back><ref-list><p>ref</p></ref-list></back></article>`;
+    expect(jatsToMarkdown(xml)).toBe("# Imidazoles & more\n\n## Abstract\n\nShort summary.\n\n## 1. Introduction\n\nText.\n");
+  });
+
+  test("returns empty when there is no body", () => {
+    expect(jatsToMarkdown("<article><front><article-title>x</article-title></front></article>")).toBe("");
   });
 });
