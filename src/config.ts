@@ -43,6 +43,10 @@ export const config = {
   api: {
     port: envInt("PORT", 3000),
   },
+  traces: {
+    enabled: env("TRACES_ENABLED", "true") !== "false",
+    dir: env("TRACE_DIR", "data/traces"),
+  },
 } as const;
 
 export type Config = typeof config;

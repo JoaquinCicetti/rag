@@ -1,7 +1,9 @@
-/** Usage: bun run ask "question" [--top-k 5] [--json] [--show-context] */
+/** Usage: bun run ask "question" [--top-k 5] [--json] [--show-context] [--trace] */
 import { parseArgs } from "node:util";
 import { createEmbedder } from "../embeddings/ollama.ts";
 import { createLLM } from "../generation/llm.ts";
+import { formatTrace } from "../observability/format.ts";
+import { findTrace } from "../observability/trace.ts";
 import { ask } from "../pipeline/ask.ts";
 import { createVectorStore } from "../vectorstore/qdrant.ts";
 
@@ -12,12 +14,13 @@ const { values, positionals } = parseArgs({
     "top-k": { type: "string", short: "k" },
     json: { type: "boolean", default: false },
     "show-context": { type: "boolean", default: false },
+    trace: { type: "boolean", default: false },
   },
 });
 
 const question = positionals.join(" ").trim();
 if (!question) {
-  console.error('usage: bun run ask "question" [--top-k 5] [--json] [--show-context]');
+  console.error('usage: bun run ask "question" [--top-k 5] [--json] [--show-context] [--trace]');
   process.exit(1);
 }
 
@@ -46,6 +49,20 @@ if (values["show-context"]) {
   }
 }
 const t = answer.timings;
+const u = answer.usage;
+const fmt = (v?: number) => (v === undefined ? "?" : String(v));
+const tokens = u
+  ? ` | tokens in=${fmt(u.inputTokens)} (cached ${fmt(u.cachedInputTokens)}) out=${fmt(u.outputTokens)}` +
+    (u.outputTokens && u.evalMs ? ` ${(u.outputTokens / (u.evalMs / 1000)).toFixed(1)} tok/s` : "")
+  : "";
+const ctx = answer.context ? ` | context ${answer.context.chars}/${answer.context.budget} chars` : "";
 console.log(
-  `\nmodel=${answer.model} embed=${t.embedMs.toFixed(0)}ms search=${t.searchMs.toFixed(0)}ms generate=${t.generateMs.toFixed(0)}ms total=${t.totalMs.toFixed(0)}ms`,
+  `\nmodel=${answer.model} embed=${t.embedMs.toFixed(0)}ms search=${t.searchMs.toFixed(0)}ms generate=${t.generateMs.toFixed(0)}ms total=${t.totalMs.toFixed(0)}ms${ctx}${tokens}`,
 );
+
+if (values.trace) {
+  const record = await findTrace(answer.traceId);
+  console.log(record ? `\n${formatTrace(record)}` : "\n(trace not found; is TRACES_ENABLED=false?)");
+} else {
+  console.log(`trace ${answer.traceId.slice(0, 8)}  (bun run traces ${answer.traceId.slice(0, 8)})`);
+}

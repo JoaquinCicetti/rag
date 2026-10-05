@@ -76,17 +76,17 @@ Tecnologías: Bun + TypeScript + Docker + Qdrant + Ollama. No usar LangChain/Lla
 - [ ] Automatizar los experimentos para poder comparar versiones del pipeline.
 - [ ] Crear un pequeño benchmark que corra cada vez que cambies el sistema.
 
-## 8. Observability y debugging — `[ ]`
+## 8. Observability y debugging — `[~]` (tracing básico adelantado)
 
 - [ ] Trazar cada request de punta a punta.
 - [ ] Registrar query rewriting.
-- [ ] Registrar embedding model.
+- [x] Registrar embedding model.
 - [ ] Registrar búsquedas vectoriales y lexicales.
-- [ ] Registrar resultados del retrieval.
+- [x] Registrar resultados del retrieval.
 - [ ] Registrar re-ranking.
-- [ ] Registrar contexto final enviado al LLM.
-- [ ] Registrar modelo, tokens, costo y latencia.
-- [ ] Medir latencia por etapa.
+- [x] Registrar contexto final enviado al LLM.
+- [~] Registrar modelo, tokens, costo y latencia. (tokens, cache y latencia listos; falta costo)
+- [x] Medir latencia por etapa.
 - [ ] Construir una vista para inspeccionar por qué una respuesta fue generada.
 
 ## 9. Production architecture — `[ ]`

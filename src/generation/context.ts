@@ -8,6 +8,10 @@ export interface BuiltContext {
   citations: Citation[];
   /** Chunks dropped because of the character budget. */
   dropped: number;
+  /** Length of `text`. */
+  chars: number;
+  /** Character budget that was applied. */
+  budget: number;
 }
 
 /**
@@ -45,7 +49,8 @@ export const buildContext = (
     });
   }
 
-  return { text: parts.join("\n"), citations, dropped };
+  const text = parts.join("\n");
+  return { text, citations, dropped, chars: text.length, budget: maxChars };
 };
 
 const snippet = (s: string, max = 160): string => {

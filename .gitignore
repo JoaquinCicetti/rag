@@ -2,6 +2,7 @@ node_modules/
 .env
 .env.*.local
 data/uploads/*
+data/traces/
 !data/uploads/.gitkeep
 dist/
 *.log
