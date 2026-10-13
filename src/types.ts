@@ -1,11 +1,24 @@
 import type { LLMUsage } from "./generation/llm.ts";
 
+export interface Span {
+  start: number;
+  end: number;
+}
+
+export interface PageSpan extends Span {
+  page: number;
+}
+
+export type ChunkStrategy = "fixed" | "paragraph" | "heading" | "semantic";
+
 export interface Document {
   sourceId: string;
   sourcePath: string;
   title: string;
   text: string;
   format: string;
+  contentHash: string;
+  pages?: Array<PageSpan>;
 }
 
 export interface ChunkMetadata {
@@ -15,8 +28,12 @@ export interface ChunkMetadata {
   chunkIndex: number;
   start: number;
   end: number;
+  strategy: ChunkStrategy;
+  format: string;
+  contentHash: string;
   section?: string;
   page?: number;
+  pageEnd?: number;
 }
 
 export interface Chunk {
@@ -36,6 +53,8 @@ export interface Citation {
   chunkIndex: number;
   score: number;
   snippet: string;
+  section?: string;
+  page?: number;
 }
 
 export interface Answer {

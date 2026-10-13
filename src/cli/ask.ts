@@ -38,7 +38,8 @@ console.log(`\n${answer.answer}\n`);
 if (answer.citations.length > 0) {
   console.log("Sources:");
   for (const citation of answer.citations) {
-    console.log(`  [${citation.n}] ${citation.sourcePath}#chunk${citation.chunkIndex} (score ${citation.score.toFixed(3)}) — ${citation.title}`);
+    const location = `${citation.section ? ` › ${citation.section}` : ""}${citation.page !== undefined ? ` (p. ${citation.page})` : ""}`;
+    console.log(`  [${citation.n}] ${citation.sourcePath}#chunk${citation.chunkIndex} (score ${citation.score.toFixed(3)}) — ${citation.title}${location}`);
   }
 }
 if (values["show-context"]) {

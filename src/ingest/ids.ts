@@ -14,5 +14,5 @@ export const uuidFromHex = (hex: string): string => {
   return `${uuid.slice(0, 8)}-${uuid.slice(8, 12)}-${uuid.slice(12, 16)}-${uuid.slice(16, 20)}-${uuid.slice(20, 32)}`;
 };
 
-export const chunkIdFor = (sourceId: string, chunkIndex: number): string =>
-  uuidFromHex(sha256(`${sourceId}:${chunkIndex}`));
+export const chunkIdFor = (sourceId: string, start: number, end: number): string =>
+  uuidFromHex(sha256(`${sourceId}:${start}:${end}`));
