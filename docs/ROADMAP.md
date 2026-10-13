@@ -17,16 +17,18 @@ Estado: `[x]` hecho · `[~]` en progreso · `[ ]` pendiente. Cada paso tiene sus
 
 Tecnologías: Bun + TypeScript + Docker + Qdrant + Ollama. No usar LangChain/LlamaIndex todavía: implementar el pipeline manualmente para entender cada pieza.
 
-## 2. Ingestion y chunking serio — `[~]` ([agente de papers](steps/02-paper-agent.md))
+## 2. Ingestion y chunking serio — `[x]` ([notas](steps/02-ingestion-chunking.md), [agente de papers](steps/02-paper-agent.md))
 
-- [~] Soportar Markdown, TXT, PDF, HTML y DOCX. (MD, TXT y PDF listos)
-- [ ] Comparar fixed-size chunking.
-- [ ] Comparar chunking por párrafos.
-- [ ] Comparar chunking por headings/secciones.
-- [ ] Experimentar con chunks semánticos.
-- [ ] Agregar overlap cuando corresponda.
-- [ ] Guardar metadata: documento, sección, página, título, posición y source ID.
-- [ ] Diseñar IDs estables para poder rastrear cada chunk hasta su fuente original.
+- [x] Soportar Markdown, TXT, PDF, HTML y DOCX.
+- [x] Comparar fixed-size chunking.
+- [x] Comparar chunking por párrafos.
+- [x] Comparar chunking por headings/secciones.
+- [x] Experimentar con chunks semánticos.
+- [x] Agregar overlap cuando corresponda.
+- [x] Guardar metadata: documento, sección, página, título, posición y source ID.
+- [x] Diseñar IDs estables para poder rastrear cada chunk hasta su fuente original.
+
+La comparación de este paso es estructural (tamaños y fronteras, `bun run chunks`). Cuál recupera mejor se mide en el paso 7.
 
 ## 3. Retrieval avanzado — `[ ]`
 

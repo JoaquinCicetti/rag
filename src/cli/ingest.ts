@@ -1,17 +1,23 @@
 import { parseArgs } from "node:util";
 import { createEmbedder } from "../embeddings/ollama.ts";
+import { parseStrategy } from "../ingest/chunk.ts";
 import { ingestPath } from "../pipeline/ingest.ts";
 import { createVectorStore } from "../vectorstore/qdrant.ts";
 
-const { positionals } = parseArgs({ args: Bun.argv.slice(2), allowPositionals: true });
+const { positionals, values } = parseArgs({
+  args: Bun.argv.slice(2),
+  allowPositionals: true,
+  options: { strategy: { type: "string" } },
+});
 const path = positionals[0];
 if (!path) {
-  console.error("usage: bun run ingest <file-or-directory>");
+  console.error("usage: bun run ingest <file-or-directory> [--strategy fixed|paragraph|heading|semantic]");
   process.exit(1);
 }
 
 const store = createVectorStore();
-const report = await ingestPath(path, { embedder: createEmbedder(), store }, { log: console.log });
+const strategy = values.strategy ? parseStrategy(values.strategy) : undefined;
+const report = await ingestPath(path, { embedder: createEmbedder(), store }, { log: console.log, strategy });
 
 console.log(
   `\ningested ${report.documents} document(s), ${report.chunks} chunk(s) in ${(report.ms / 1000).toFixed(1)}s`,

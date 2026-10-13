@@ -111,7 +111,17 @@ describe("buildContext stats", () => {
     id: String(i),
     text,
     score: 1 - i / 10,
-    metadata: { sourceId: "s", sourcePath: "a.md", title: "A", chunkIndex: i, start: 0, end: text.length },
+    metadata: {
+      sourceId: "s",
+      sourcePath: "a.md",
+      title: "A",
+      chunkIndex: i,
+      start: 0,
+      end: text.length,
+      strategy: "fixed",
+      format: "md",
+      contentHash: "h",
+    },
   });
 
   test("reports chars, budget and dropped", () => {

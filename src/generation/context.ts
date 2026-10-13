@@ -24,7 +24,9 @@ export const buildContext = (chunks: Array<RetrievedChunk>, options?: ContextOpt
 
   for (const chunk of chunks) {
     const citationNumber = citations.length + 1;
-    const header = `[${citationNumber}] source: ${chunk.metadata.sourcePath}#chunk${chunk.metadata.chunkIndex} | title: ${chunk.metadata.title}`;
+    const { section, page } = chunk.metadata;
+    const location = `${section ? ` | section: ${section}` : ""}${page !== undefined ? ` | page: ${page}` : ""}`;
+    const header = `[${citationNumber}] source: ${chunk.metadata.sourcePath}#chunk${chunk.metadata.chunkIndex} | title: ${chunk.metadata.title}${location}`;
     const block = `${header}\n${chunk.text}\n`;
     if (usedChars + block.length > maxChars && citations.length > 0) {
       dropped++;
@@ -39,6 +41,8 @@ export const buildContext = (chunks: Array<RetrievedChunk>, options?: ContextOpt
       chunkIndex: chunk.metadata.chunkIndex,
       score: chunk.score,
       snippet: snippet(chunk.text),
+      ...(section ? { section } : {}),
+      ...(page !== undefined ? { page } : {}),
     });
   }
 

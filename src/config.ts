@@ -1,3 +1,5 @@
+import { parseStrategy } from "./ingest/chunk.ts";
+
 const env = (key: string, fallback: string): string => {
   const value = process.env[key];
   return value === undefined || value === "" ? fallback : value;
@@ -27,6 +29,8 @@ export const config = {
     anthropicApiKey: env("ANTHROPIC_API_KEY", ""),
   },
   chunking: {
+    strategy: parseStrategy(env("CHUNK_STRATEGY", "fixed")),
+    semanticPercentile: envInt("CHUNK_SEMANTIC_PERCENTILE", 90),
     size: envInt("CHUNK_SIZE", 1000),
     overlap: envInt("CHUNK_OVERLAP", 200),
   },

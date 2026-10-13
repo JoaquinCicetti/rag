@@ -9,12 +9,13 @@ describe("ids", () => {
     expect(sourceIdFor("docs/a.md")).not.toBe(sourceIdFor("docs/b.md"));
   });
 
-  test("chunkIdFor is a valid UUID and deterministic", () => {
-    const id = chunkIdFor("abc", 0);
+  test("chunkIdFor is a valid UUID, deterministic and tied to the source span", () => {
+    const id = chunkIdFor("abc", 0, 100);
     expect(id).toMatch(UUID_RE);
-    expect(chunkIdFor("abc", 0)).toBe(id);
-    expect(chunkIdFor("abc", 1)).not.toBe(id);
-    expect(chunkIdFor("abd", 0)).not.toBe(id);
+    expect(chunkIdFor("abc", 0, 100)).toBe(id);
+    expect(chunkIdFor("abc", 0, 101)).not.toBe(id);
+    expect(chunkIdFor("abc", 1, 100)).not.toBe(id);
+    expect(chunkIdFor("abd", 0, 100)).not.toBe(id);
   });
 
   test("uuidFromHex sets version and variant nibbles", () => {

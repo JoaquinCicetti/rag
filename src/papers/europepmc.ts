@@ -1,3 +1,5 @@
+import { decodeEntities } from "../ingest/entities.ts";
+
 const EUROPE_PMC_URL = "https://www.ebi.ac.uk/europepmc/webservices/rest";
 const DROPPED_ELEMENTS = ["table-wrap", "fig", "ref-list", "xref", "supplementary-material", "graphic", "inline-formula", "disp-formula"];
 
@@ -14,14 +16,6 @@ interface EuropePmcResultList {
 interface EuropePmcSearchResponse {
   resultList?: EuropePmcResultList;
 }
-
-const ENTITIES: Record<string, string> = { "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&apos;": "'" };
-
-const decodeEntities = (text: string): string =>
-  text
-    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => String.fromCodePoint(Number.parseInt(hex, 16)))
-    .replace(/&#(\d+);/g, (_, decimal: string) => String.fromCodePoint(Number(decimal)))
-    .replace(/&(amp|lt|gt|quot|apos);/g, (entity) => ENTITIES[entity] ?? entity);
 
 const plainText = (xml: string): string => decodeEntities(xml.replace(/<[^>]+>/g, "")).replace(/\s+/g, " ").trim();
 
