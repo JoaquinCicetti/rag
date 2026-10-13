@@ -18,6 +18,15 @@ curl -s localhost:3000/health
 curl -s localhost:3000/ask -H 'content-type: application/json' -d '{"question":"What is recall@k?"}'
 ```
 
+## Ingestion and chunking
+
+`ingest` reads `.md`, `.txt`, `.pdf`, `.html` and `.docx`. Four chunking strategies share one interface: `fixed`, `paragraph`, `heading` and `semantic` (`CHUNK_STRATEGY` or `--strategy`). Every chunk keeps its section and page.
+
+```bash
+bun run chunks data/samples --strategy fixed,paragraph,heading   # compare sizes and boundaries, no indexing
+bun run ingest data/samples --strategy heading
+```
+
 ## Tracing
 
 Every `ask` and `ingest` writes a trace (one JSONL line) to `data/traces/YYYY-MM-DD.jsonl`.

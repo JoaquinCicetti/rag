@@ -1,0 +1,67 @@
+import type { Span } from "../../types.ts";
+
+export interface FixedChunkOptions {
+  size: number;
+  overlap: number;
+}
+
+export const assertChunkOptions = (options: FixedChunkOptions): void => {
+  if (options.size <= 0) throw new Error("chunk size must be > 0");
+  if (options.overlap < 0 || options.overlap >= options.size) throw new Error("overlap must be in [0, size)");
+};
+
+export const fixedSizeSpans = (text: string, options: FixedChunkOptions): Array<Span> => {
+  assertChunkOptions(options);
+  const { size, overlap } = options;
+
+  const spans: Array<Span> = [];
+  const length = text.length;
+  let start = 0;
+
+  while (start < length) {
+    let end = Math.min(start + size, length);
+
+    if (end < length) {
+      const minCut = start + Math.floor(size / 2);
+      const window = text.slice(minCut, end);
+      const candidates = [
+        window.lastIndexOf("\n\n"),
+        window.lastIndexOf("\n"),
+        lastSentenceEnd(window),
+        window.lastIndexOf(" "),
+      ];
+      const cut = candidates.find((candidate) => candidate > 0);
+      if (cut !== undefined) end = minCut + cut + 1;
+    }
+
+    const trimmedStart = skipWhitespace(text, start, end);
+    const trimmedEnd = trimWhitespaceEnd(text, trimmedStart, end);
+    if (trimmedEnd > trimmedStart) spans.push({ start: trimmedStart, end: trimmedEnd });
+
+    if (end >= length) break;
+    const nextStart = end - overlap;
+    start = nextStart > start ? nextStart : end;
+  }
+
+  return spans;
+};
+
+const lastSentenceEnd = (text: string): number => {
+  const matches = [...text.matchAll(/[.!?]["')\]]?\s/g)];
+  const last = matches.at(-1);
+  return last?.index !== undefined ? last.index + last[0].length - 1 : -1;
+};
+
+const isWhitespace = (char: string | undefined): boolean => /\s/.test(char ?? "");
+
+const skipWhitespace = (text: string, from: number, to: number): number => {
+  let position = from;
+  while (position < to && isWhitespace(text[position])) position++;
+  return position;
+};
+
+const trimWhitespaceEnd = (text: string, from: number, to: number): number => {
+  let position = to;
+  while (position > from && isWhitespace(text[position - 1])) position--;
+  return position;
+};

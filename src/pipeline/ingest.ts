@@ -1,9 +1,9 @@
 import { config } from "../config.ts";
-import { chunkDocument } from "../ingest/chunk.ts";
+import { chunkDocument, type ChunkOptions } from "../ingest/chunk.ts";
 import { loadDocuments } from "../ingest/loaders.ts";
 import { Trace, writeTrace } from "../observability/trace.ts";
 import type { SearchDeps } from "../retrieval/search.ts";
-import type { Chunk } from "../types.ts";
+import type { Chunk, ChunkStrategy } from "../types.ts";
 
 export interface DocumentSummary {
   sourcePath: string;
@@ -23,6 +23,7 @@ export interface IngestReport {
 
 export interface IngestOptions {
   log?: (line: string) => void;
+  strategy?: ChunkStrategy;
 }
 
 const silent = (): void => {};
@@ -36,7 +37,8 @@ const averageChars = (chunks: Array<Chunk>): number => {
 export const ingestPath = async (path: string, deps: SearchDeps, options?: IngestOptions): Promise<IngestReport> => {
   const trace = new Trace("ingest", path);
   try {
-    return await run(path, deps, options?.log ?? silent, trace);
+    const chunking = { ...config.chunking, strategy: options?.strategy ?? config.chunking.strategy };
+    return await run(path, deps, options?.log ?? silent, trace, chunking);
   } catch (error) {
     trace.fail(error);
     throw error;
@@ -45,9 +47,15 @@ export const ingestPath = async (path: string, deps: SearchDeps, options?: Inges
   }
 };
 
-const run = async (path: string, deps: SearchDeps, log: (line: string) => void, trace: Trace): Promise<IngestReport> => {
+const run = async (
+  path: string,
+  deps: SearchDeps,
+  log: (line: string) => void,
+  trace: Trace,
+  chunking: ChunkOptions,
+): Promise<IngestReport> => {
   const startedAt = performance.now();
-  trace.set({ embedModel: deps.embedder.model, chunking: config.chunking });
+  trace.set({ embedModel: deps.embedder.model, chunking });
 
   await deps.store.ensureCollection(deps.embedder.dim);
   const documents = await trace.span("load", async (span) => {
@@ -64,10 +72,15 @@ const run = async (path: string, deps: SearchDeps, log: (line: string) => void, 
 
   for (const doc of documents) {
     await trace.span("document", async (span) => {
-      const chunks = await span.span("chunk", (chunkSpan) => {
-        const docChunks = chunkDocument(doc, config.chunking);
-        chunkSpan.set({ chunks: docChunks.length, avgChars: averageChars(docChunks) });
-        return docChunks;
+      const chunks = await span.span("chunk", async (chunkSpan) => {
+        const chunked = await chunkDocument(doc, chunking, { embedder: deps.embedder });
+        chunkSpan.set({
+          strategy: chunking.strategy,
+          chunks: chunked.chunks.length,
+          avgChars: averageChars(chunked.chunks),
+          ...(chunked.embedTokens > 0 ? { embedTokens: chunked.embedTokens } : {}),
+        });
+        return chunked.chunks;
       });
       log(`  ${doc.sourcePath}: ${chunks.length} chunk(s), embedding…`);
       await span.span("delete-stale", () => deps.store.deleteBySource(doc.sourceId));
@@ -83,7 +96,7 @@ const run = async (path: string, deps: SearchDeps, log: (line: string) => void, 
         return embeddings;
       });
       await span.span("upsert", () => deps.store.upsert(chunks, vectors), { points: chunks.length });
-      span.set({ sourcePath: doc.sourcePath, title: doc.title, chars: doc.text.length, chunks: chunks.length });
+      span.set({ sourcePath: doc.sourcePath, title: doc.title, format: doc.format, chars: doc.text.length, chunks: chunks.length });
       perDocument.push({ sourcePath: doc.sourcePath, title: doc.title, chunks: chunks.length });
       totalChunks += chunks.length;
     });

@@ -82,7 +82,10 @@ const describe = (span: SpanRecord): Array<string> => {
     case "tool":
       return describeTool(attrs);
     case "chunk":
-      return [`${count(attrs.chunks)} chunks, avg ${count(attrs.avgChars)} chars`];
+      return [
+        `${attrs.strategy ? `${attrs.strategy}  ` : ""}${count(attrs.chunks)} chunks, avg ${count(attrs.avgChars)} chars` +
+          (attrs.embedTokens ? `  (${count(attrs.embedTokens)} tok embedded to find boundaries)` : ""),
+      ];
     case "upsert":
       return [`${count(attrs.points)} points`];
     case "load":

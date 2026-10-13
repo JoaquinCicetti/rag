@@ -1,83 +1,85 @@
-import type { Chunk, Document } from "../types.ts";
-import { chunkIdFor } from "./ids.ts";
+import type { Embedder } from "../embeddings/ollama.ts";
+import type { Chunk, ChunkStrategy, Document, Span } from "../types.ts";
+import { fixedSizeSpans, type FixedChunkOptions } from "./chunkers/fixed.ts";
+import { headingSpans } from "./chunkers/heading.ts";
+import { paragraphSpans } from "./chunkers/paragraph.ts";
+import { semanticSpans } from "./chunkers/semantic.ts";
+import { chunkIdFor, sha256 } from "./ids.ts";
+import { pageAt, parseSections, sectionFor } from "./structure.ts";
 
-export interface FixedChunkOptions {
-  size: number;
-  overlap: number;
+export const CHUNK_STRATEGIES: ReadonlyArray<ChunkStrategy> = ["fixed", "paragraph", "heading", "semantic"];
+
+export const parseStrategy = (value: string): ChunkStrategy => {
+  const strategy = CHUNK_STRATEGIES.find((candidate) => candidate === value);
+  if (!strategy) throw new Error(`unknown chunk strategy "${value}" (expected ${CHUNK_STRATEGIES.join(", ")})`);
+  return strategy;
+};
+
+export interface ChunkOptions extends FixedChunkOptions {
+  strategy?: ChunkStrategy;
+  semanticPercentile?: number;
 }
 
-interface Span {
-  start: number;
-  end: number;
+export interface ChunkDeps {
+  embedder?: Embedder;
 }
 
-export const fixedSizeSpans = (text: string, options: FixedChunkOptions): Array<Span> => {
-  const { size, overlap } = options;
-  if (size <= 0) throw new Error("chunk size must be > 0");
-  if (overlap < 0 || overlap >= size) throw new Error("overlap must be in [0, size)");
+export interface ChunkedDocument {
+  chunks: Array<Chunk>;
+  embedTokens: number;
+}
 
-  const spans: Array<Span> = [];
-  const length = text.length;
-  let start = 0;
+interface StrategyResult {
+  spans: Array<Span>;
+  embedTokens: number;
+}
 
-  while (start < length) {
-    let end = Math.min(start + size, length);
-
-    if (end < length) {
-      const minCut = start + Math.floor(size / 2);
-      const window = text.slice(minCut, end);
-      const candidates = [
-        window.lastIndexOf("\n\n"),
-        window.lastIndexOf("\n"),
-        lastSentenceEnd(window),
-        window.lastIndexOf(" "),
-      ];
-      const cut = candidates.find((candidate) => candidate > 0);
-      if (cut !== undefined) end = minCut + cut + 1;
-    }
-
-    const trimmedStart = skipWhitespace(text, start, end);
-    const trimmedEnd = trimWhitespaceEnd(text, trimmedStart, end);
-    if (trimmedEnd > trimmedStart) spans.push({ start: trimmedStart, end: trimmedEnd });
-
-    if (end >= length) break;
-    const nextStart = end - overlap;
-    start = nextStart > start ? nextStart : end;
+const spansFor = async (doc: Document, options: ChunkOptions, deps?: ChunkDeps): Promise<StrategyResult> => {
+  const strategy = options.strategy ?? "fixed";
+  if (strategy === "semantic") {
+    if (!deps?.embedder) throw new Error("semantic chunking needs an embedder");
+    return semanticSpans(doc.text, { ...options, percentile: options.semanticPercentile }, deps.embedder);
   }
-
-  return spans;
+  if (strategy === "paragraph") return { spans: paragraphSpans(doc.text, options), embedTokens: 0 };
+  if (strategy === "heading") return { spans: headingSpans(doc.text, options), embedTokens: 0 };
+  return { spans: fixedSizeSpans(doc.text, options), embedTokens: 0 };
 };
 
-const lastSentenceEnd = (text: string): number => {
-  const matches = [...text.matchAll(/[.!?]["')\]]?\s/g)];
-  const last = matches.at(-1);
-  return last?.index !== undefined ? last.index + last[0].length - 1 : -1;
+const SECTION_SEPARATOR = " > ";
+
+const withoutTitle = (section: string | undefined, title: string): string | undefined => {
+  if (section === undefined || section === title) return undefined;
+  return section.startsWith(`${title}${SECTION_SEPARATOR}`) ? section.slice(title.length + SECTION_SEPARATOR.length) : section;
 };
 
-const isWhitespace = (char: string | undefined): boolean => /\s/.test(char ?? "");
+export const chunkDocument = async (doc: Document, options: ChunkOptions, deps?: ChunkDeps): Promise<ChunkedDocument> => {
+  const strategy = options.strategy ?? "fixed";
+  const { spans, embedTokens } = await spansFor(doc, options, deps);
+  const sections = parseSections(doc.text);
 
-const skipWhitespace = (text: string, from: number, to: number): number => {
-  let position = from;
-  while (position < to && isWhitespace(text[position])) position++;
-  return position;
+  const chunks = spans.map((span, chunkIndex): Chunk => {
+    const text = doc.text.slice(span.start, span.end);
+    const section = withoutTitle(sectionFor(sections, span), doc.title);
+    const page = doc.pages ? pageAt(doc.pages, span.start) : undefined;
+    const pageEnd = doc.pages ? pageAt(doc.pages, span.end - 1) : undefined;
+    return {
+      id: chunkIdFor(doc.sourceId, span.start, span.end),
+      text,
+      metadata: {
+        sourceId: doc.sourceId,
+        sourcePath: doc.sourcePath,
+        title: doc.title,
+        chunkIndex,
+        start: span.start,
+        end: span.end,
+        strategy,
+        format: doc.format,
+        contentHash: sha256(text),
+        ...(section ? { section } : {}),
+        ...(page !== undefined ? { page } : {}),
+        ...(pageEnd !== undefined && pageEnd !== page ? { pageEnd } : {}),
+      },
+    };
+  });
+  return { chunks, embedTokens };
 };
-
-const trimWhitespaceEnd = (text: string, from: number, to: number): number => {
-  let position = to;
-  while (position > from && isWhitespace(text[position - 1])) position--;
-  return position;
-};
-
-export const chunkDocument = (doc: Document, options: FixedChunkOptions): Array<Chunk> =>
-  fixedSizeSpans(doc.text, options).map((span, chunkIndex) => ({
-    id: chunkIdFor(doc.sourceId, chunkIndex),
-    text: doc.text.slice(span.start, span.end),
-    metadata: {
-      sourceId: doc.sourceId,
-      sourcePath: doc.sourcePath,
-      title: doc.title,
-      chunkIndex,
-      start: span.start,
-      end: span.end,
-    },
-  }));

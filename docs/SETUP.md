@@ -52,7 +52,8 @@ bun run dev                          # HTTP API on :3000
 | `bun run infra:reset` | **destroys all volumes** and re-bootstraps from scratch |
 | `bun run infra:ps` / `infra:logs` | status / tail logs |
 | `bun run models:pull` | pull the embedding + LLM models |
-| `bun run ingest <path>` | index a file or directory (`.md`, `.txt` in step 1) |
+| `bun run ingest <path> [--strategy heading]` | index a file or directory (`.md`, `.txt`, `.pdf`, `.html`, `.docx`) |
+| `bun run chunks <path> [--strategy fixed,paragraph,heading,semantic] [--show N]` | compare chunking strategies without indexing |
 | `bun run ask "..." [--top-k 5] [--json] [--show-context]` | query the index |
 | `bun run test` / `typecheck` | unit tests / `tsc --noEmit` |
 
@@ -62,7 +63,8 @@ All settings live in `.env` (see `.env.example` for every key and its default). 
 
 - `EMBED_MODEL` / `EMBED_DIM`: must match. Changing the model requires a new collection (`QDRANT_COLLECTION`) or `infra:reset`.
 - `LLM_PROVIDER=ollama|anthropic`, `LLM_MODEL`, `ANTHROPIC_API_KEY`.
-- `CHUNK_SIZE`, `CHUNK_OVERLAP`, `TOP_K`, `CONTEXT_MAX_CHARS`.
+- `CHUNK_STRATEGY=fixed|paragraph|heading|semantic`, `CHUNK_SIZE`, `CHUNK_OVERLAP`. `semantic` embeds every sentence at ingest, so it is much slower.
+- `TOP_K`, `CONTEXT_MAX_CHARS`.
 
 ## Ollama in Docker
 

@@ -21,7 +21,7 @@ Wiley, MDPI, Elsevier y el `pdf=render` de Europe PMC devuelven 403 a scripts. N
 
 **Thinking.** `qwen3.5` piensa por defecto. `ask` manda `think: false`: con el contexto ya recuperado no hace falta, y la respuesta bajó de 96 s (3.932 tokens) a 16 s (165 tokens). El agente lo deja activado.
 
-**PDF loader.** `unpdf` extrae el texto con las páginas unidas. El título sale del nombre de archivo (`<año>-<slug-del-título>.pdf`). Todavía no se guarda metadata de página: queda para el resto del paso 2.
+**PDF loader.** `unpdf` extrae el texto con las páginas unidas. El título sale del nombre de archivo (`<año>-<slug-del-título>.pdf`). La metadata de página se agregó después, ver [ingestion y chunking](02-ingestion-chunking.md).
 
 **Observabilidad.** Cada corrida es un trace `papers`: un span `llm` por paso (tokens y tools pedidas) y un span `tool` por llamada (argumentos y resultado).
 

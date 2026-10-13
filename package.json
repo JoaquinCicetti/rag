@@ -13,6 +13,7 @@
     "infra:ps": "docker compose ps",
     "models:pull": "ollama pull bge-m3 && ollama pull qwen3.5:35b",
     "ingest": "bun src/cli/ingest.ts",
+    "chunks": "bun src/cli/chunks.ts",
     "ask": "bun src/cli/ask.ts",
     "traces": "bun src/cli/traces.ts",
     "papers": "bun src/cli/papers.ts",
@@ -25,6 +26,7 @@
   "dependencies": {
     "@qdrant/js-client-rest": "^1.13.0",
     "hono": "^4.7.0",
+    "mammoth": "^1.13.0",
     "unpdf": "^1.8.1"
   },
   "devDependencies": {
