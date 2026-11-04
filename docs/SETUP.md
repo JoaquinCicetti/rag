@@ -42,14 +42,14 @@ bun run dev                          # HTTP API on :3000
 | MinIO API | http://127.0.0.1:9000 | bucket `documents` created automatically |
 | MinIO console | http://127.0.0.1:9001 | `minioadmin` / `minioadmin` |
 | Ollama | http://127.0.0.1:11434 | native, or docker profile |
-| RAG API | http://127.0.0.1:3000 | `bun run dev` |
+| RAG API and search UI | http://127.0.0.1:3000 | `bun run dev`. Local only; set `API_HOST` to expose it, knowing it has no auth and `/ingest` reads any local path |
 
 ## Everyday commands
 
 | Command | What it does |
 | --- | --- |
 | `bun run infra:up` / `infra:down` | start / stop containers, keep data |
-| `bun run infra:reset` | **destroys all volumes** and re-bootstraps from scratch |
+| `bun run infra:reset` | **destroys all volumes, deletes downloaded papers** (`*.md` and `*.pdf` directly in `PAPERS_DIR`) and re-bootstraps. Traces and `data/uploads` are kept |
 | `bun run infra:ps` / `infra:logs` | status / tail logs |
 | `bun run models:pull` | pull the embedding + LLM models |
 | `bun run ingest <path> [--strategy heading]` | index a file or directory (`.md`, `.txt`, `.pdf`, `.html`, `.docx`) |
