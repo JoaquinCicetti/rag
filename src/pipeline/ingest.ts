@@ -83,7 +83,6 @@ const run = async (
         return chunked.chunks;
       });
       log(`  ${doc.sourcePath}: ${chunks.length} chunk(s), embedding…`);
-      await span.span("delete-stale", () => deps.store.deleteBySource(doc.sourceId));
       const vectors = await span.span("embed", async (embedSpan) => {
         const { embeddings, stats } = await deps.embedder.embedWithStats(chunks.map((chunk) => chunk.text));
         embedSpan.set({
@@ -95,6 +94,7 @@ const run = async (
         embedMs += stats.totalMs;
         return embeddings;
       });
+      await span.span("delete-stale", () => deps.store.deleteBySource(doc.sourceId));
       await span.span("upsert", () => deps.store.upsert(chunks, vectors), { points: chunks.length });
       span.set({ sourcePath: doc.sourcePath, title: doc.title, format: doc.format, chars: doc.text.length, chunks: chunks.length });
       perDocument.push({ sourcePath: doc.sourcePath, title: doc.title, chunks: chunks.length });
