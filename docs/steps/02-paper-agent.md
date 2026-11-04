@@ -25,6 +25,10 @@ Wiley, MDPI, Elsevier y el `pdf=render` de Europe PMC devuelven 403 a scripts. N
 
 **Observabilidad.** Cada corrida es un trace `papers`: un span `llm` por paso (tokens y tools pedidas) y un span `tool` por llamada (argumentos y resultado).
 
+**Tablas y ecuaciones.** `jatsToMarkdown` conserva las tablas (filas `a | b`) y las fórmulas (TeX o MathML), y deja un marcador cuando solo existen como imagen. Sin esto, un paper de isotermas perdía justo las ecuaciones y los coeficientes. Los PDFs siguen siendo texto plano, así que ahí tablas y ecuaciones pueden salir desordenadas.
+
+**PDFs de editoriales.** En temas fuera de biomedicina casi ningún paper está en PMC. Por eso los resultados se marcan `yes` (PMC o arXiv), `pdf` (hay un link, pero la editorial puede bloquearlo) o `uncertain`, y el agente prueba `pdf` en lugar de descartarlos.
+
 ## Requisitos
 
 Bun >= 1.4. Bun 1.2.4 tiene un segfault con algunos PDFs dentro de pdf.js.

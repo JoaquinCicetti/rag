@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { parseInlineToolCalls, type ChatMessage, type LLM, type LLMResult } from "../src/generation/llm.ts";
 import { collectPapers } from "../src/papers/agent.ts";
 import { jatsToMarkdown } from "../src/papers/europepmc.ts";
-import { isPdf, parseOpenAlexWork, parseUnpaywall, slugify, type PaperHit, type PaperSources } from "../src/papers/sources.ts";
+import { fullTextLabel, isPdf, parseOpenAlexWork, parseUnpaywall, slugify, type PaperHit, type PaperSources } from "../src/papers/sources.ts";
 
 const HIT: PaperHit = {
   doi: "10.48550/arxiv.2005.11401",
@@ -161,5 +161,71 @@ describe("jatsToMarkdown", () => {
 
   test("returns empty when there is no body", () => {
     expect(jatsToMarkdown("<article><front><article-title>x</article-title></front></article>")).toBe("");
+  });
+});
+
+describe("jatsToMarkdown keeps equations and tables", () => {
+  const article = (body: string): string =>
+    `<article><front><article-title>Isotherms</article-title></front><body>${body}</body></article>`;
+
+  test("renders MathML formulas with their label", () => {
+    const math = `<mml:math><mml:mi>M</mml:mi><mml:mo>=</mml:mo><mml:msup><mml:mrow><mml:mfrac><mml:mi>a</mml:mi><mml:mrow><mml:mi>T</mml:mi><mml:mo>+</mml:mo><mml:mi>C</mml:mi></mml:mrow></mml:mfrac></mml:mrow><mml:mi>B</mml:mi></mml:msup></mml:math>`;
+    const xml = article(`<p>Model:<disp-formula><label>(1)</label>${math}</disp-formula>fits.</p>`);
+    expect(jatsToMarkdown(xml)).toContain("Model:\n\nM=(a/(T+C))^B (1)\n\nfits.");
+  });
+
+  test("keeps display equations that sit between paragraphs", () => {
+    const xml = article(`<p>Models [<xref>1</xref>,<xref>2</xref>]:</p><disp-formula><mml:math><mml:mi>M</mml:mi></mml:math></disp-formula><p>where M is moisture.</p>`);
+    expect(jatsToMarkdown(xml)).toContain("Models:\n\nM\n\nwhere M is moisture.");
+  });
+
+  test("prefers tex-math and unwraps the LaTeX document", () => {
+    const tex = String.raw`\documentclass{minimal}\begin{document}$$x &lt; y$$\end{document}`;
+    const xml = article(`<p><inline-formula><alternatives><tex-math>${tex}</tex-math><mml:math><mml:mi>z</mml:mi></mml:math></alternatives></inline-formula></p>`);
+    expect(jatsToMarkdown(xml)).toContain("x < y");
+  });
+
+  test("marks formulas that only exist as images", () => {
+    const xml = article(`<p>See <disp-formula><graphic xlink:href="eq1.gif"/></disp-formula></p>`);
+    expect(jatsToMarkdown(xml)).toContain("See\n\n[formula image not extracted]");
+  });
+
+  test("keeps table rows, caption and footnote, including tables nested in a paragraph", () => {
+    const table = `<table-wrap><label>Table 1</label><caption><p>Coefficients</p></caption><table><thead><tr><th>Grain</th><th>A</th></tr></thead><tbody><tr><td>Wheat</td><td>2.3 × 10<sup>-5</sup></td></tr></tbody></table><table-wrap-foot><p>T in °C</p></table-wrap-foot></table-wrap>`;
+    const markdown = jatsToMarkdown(article(`<p>Before ${table} after.</p>`));
+    expect(markdown).toContain("Before\n\nTable 1 Coefficients\nGrain | A\nWheat | 2.3 × 10^-5\nT in °C\n\nafter.");
+  });
+
+  test("marks tables that only exist as images", () => {
+    const xml = article(`<table-wrap><label>Table 2</label><graphic xlink:href="t2.gif"/></table-wrap><p>Text.</p>`);
+    expect(jatsToMarkdown(xml)).toContain("Table 2\n[table image not extracted]");
+  });
+
+  test("keeps exponents readable and subscripts plain", () => {
+    expect(jatsToMarkdown(article("<p>CO<sub>2</sub> at 10<sup>-3</sup> g</p>"))).toContain("CO2 at 10^-3 g");
+  });
+});
+
+describe("fullTextLabel", () => {
+  const hit = { doi: "10.1/x", title: "t", authors: [], abstract: "", pdfUrls: [] };
+
+  test("ranks PMC and arXiv above publisher PDFs above nothing", () => {
+    expect(fullTextLabel({ ...hit, pmcid: "PMC1" })).toBe("yes");
+    expect(fullTextLabel({ ...hit, pdfUrls: ["https://arxiv.org/pdf/1"] })).toBe("yes");
+    expect(fullTextLabel({ ...hit, pdfUrls: ["https://journal.example/a.pdf"] })).toBe("pdf");
+    expect(fullTextLabel(hit)).toBe("uncertain");
+  });
+});
+
+describe("collectPapers target", () => {
+  test("stops at maxPapers when one reply asks for more downloads", async () => {
+    const call = (doi: string) => ({ id: `call_${doi}`, name: "download_paper", arguments: { doi } });
+    const llm = new ScriptedLLM([
+      { text: "", model: "scripted", toolCalls: [call(HIT.doi), call("10.1/other")] },
+      { text: "summary", model: "scripted" },
+    ]);
+    const sources = { ...fakeSources(true), lookup: async (doi: string) => ({ ...HIT, doi, title: doi }) };
+    const report = await collectPapers("rag", { llm, sources }, { maxPapers: 1 });
+    expect(report.downloaded.map((paper) => paper.doi)).toEqual([HIT.doi]);
   });
 });
