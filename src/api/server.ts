@@ -5,10 +5,17 @@ import { createLLM } from "../generation/llm.ts";
 import { findTrace, readTraces } from "../observability/trace.ts";
 import { ask } from "../pipeline/ask.ts";
 import { ingestPath } from "../pipeline/ingest.ts";
+import { reconstructDocument } from "../retrieval/documents.ts";
+import { vectorSearch } from "../retrieval/search.ts";
 import { createVectorStore } from "../vectorstore/qdrant.ts";
 
 interface AskBody {
   question?: string;
+  topK?: number;
+}
+
+interface SearchBody {
+  query?: string;
   topK?: number;
 }
 
@@ -18,6 +25,9 @@ interface IngestBody {
 
 const DEFAULT_TRACE_LIMIT = 20;
 const HEALTH_TIMEOUT_MS = 2000;
+// Bun closes idle connections after 10s by default, far less than a local LLM takes to answer. 255 is its maximum.
+const IDLE_TIMEOUT_SECONDS = 255;
+const UI_PAGE = new URL("../ui/index.html", import.meta.url);
 
 const deps = { embedder: createEmbedder(), store: createVectorStore(), llm: createLLM() };
 
@@ -33,6 +43,8 @@ const probe = async (url: string): Promise<string> => {
 const emptyBody = (): object => ({});
 
 export const app = new Hono();
+
+app.get("/", async (context) => context.html(await Bun.file(UI_PAGE).text()));
 
 app.get("/health", async (context) => {
   const [qdrant, ollama] = await Promise.all([
@@ -51,6 +63,21 @@ app.get("/health", async (context) => {
     },
     healthy ? 200 : 503,
   );
+});
+
+app.post("/search", async (context) => {
+  const body = (await context.req.json().catch(emptyBody)) as SearchBody;
+  if (!body.query?.trim()) return context.json({ error: "query is required" }, 400);
+  const result = await vectorSearch(body.query.trim(), deps, { topK: body.topK });
+  return context.json(result);
+});
+
+app.get("/documents", async (context) => context.json(await deps.store.listDocuments()));
+
+app.get("/documents/:sourceId", async (context) => {
+  const chunks = await deps.store.chunksForSource(context.req.param("sourceId"));
+  const document = reconstructDocument(chunks);
+  return document ? context.json(document) : context.json({ error: "document not found" }, 404);
 });
 
 app.post("/ask", async (context) => {
@@ -89,5 +116,5 @@ app.get("/traces/:id", async (context) => {
 
 app.onError((error, context) => context.json({ error: error.message }, 500));
 
-console.log(`rag api listening on http://localhost:${config.api.port}`);
-export default { port: config.api.port, fetch: app.fetch };
+console.log(`rag api listening on http://${config.api.host}:${config.api.port}`);
+export default { hostname: config.api.host, port: config.api.port, idleTimeout: IDLE_TIMEOUT_SECONDS, fetch: app.fetch };

@@ -25,20 +25,23 @@ ASK      question ──► embed ──► Qdrant search (cosine, top-k) ──
 | `src/embeddings/ollama.ts` | `Embedder` interface + Ollama implementation |
 | `src/vectorstore/qdrant.ts` | `VectorStore` interface + Qdrant implementation |
 | `src/retrieval/search.ts` | vector search (hybrid + re-rank land here in step 3) |
+| `src/retrieval/documents.ts` | rebuilds a document's text from its chunks, keeping offsets exact |
 | `src/generation/context.ts` | numbered context block with a char budget |
 | `src/generation/prompt.ts` | system prompt, "no info" sentence |
 | `src/generation/llm.ts` | `LLM` interface, Ollama and Anthropic implementations |
 | `src/pipeline/ingest.ts` | ingest orchestration, idempotent |
 | `src/pipeline/ask.ts` | ask orchestration, citation extraction |
 | `src/cli/*` | `setup`, `ingest`, `chunks`, `ask`, `traces`, `papers` commands |
-| `src/api/server.ts` | Hono: `GET /health`, `POST /ask`, `POST /ingest` |
+| `src/papers/*` | paper agent, open-access sources, JATS and MathML to markdown |
+| `src/api/server.ts` | Hono: `GET /`, `GET /health`, `POST /search`, `POST /ask`, `POST /ingest`, `GET /documents`, `GET /documents/:sourceId`, `GET /traces` |
+| `src/ui/index.html` | search and document viewer, one file with no build step |
 
 ## Design rules
 
 - Every external call is plain `fetch` or a thin client. No orchestration framework until the roadmap says so.
 - Interfaces (`Embedder`, `VectorStore`, `LLM`) exist so implementations can be swapped and later compared in the evaluation step.
 - Every chunk is traceable: `sourcePath`, `chunkIndex`, character offsets `start`/`end` in the normalised text, plus `section` and `page` when the format has them.
-- Ingestion is idempotent by construction (ids derived from content location, stale chunks per source removed before upsert).
+- Ingestion is idempotent by construction (ids derived from content location, stale chunks per source removed once the new vectors exist, right before upsert).
 
 ## Data stores
 

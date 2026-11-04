@@ -137,6 +137,15 @@ export const slugify = (text: string): string =>
 export const isRetrievable = (hit: PaperHit): boolean =>
   Boolean(hit.pmcid) || hit.pdfUrls.some((url) => url.startsWith("https://arxiv.org/"));
 
+export type FullTextLabel = "yes" | "pdf" | "uncertain";
+
+export const fullTextLabel = (hit: PaperHit): FullTextLabel => {
+  if (isRetrievable(hit)) return "yes";
+  return hit.pdfUrls.length > 0 ? "pdf" : "uncertain";
+};
+
+const FULL_TEXT_RANK: Record<FullTextLabel, number> = { yes: 0, pdf: 1, uncertain: 2 };
+
 export const isPdf = (bytes: Uint8Array): boolean => new TextDecoder().decode(bytes.slice(0, 4)) === PDF_MAGIC;
 
 export class OpenAccessSources implements PaperSources {
@@ -159,7 +168,7 @@ export class OpenAccessSources implements PaperSources {
     const data = await this.getJson<OpenAlexSearchResponse>(`${OPENALEX_URL}?${params}`);
     const hits = (data?.results ?? []).map(parseOpenAlexWork).filter((hit): hit is PaperHit => hit !== undefined);
     const annotated = await this.withPmcids(hits);
-    return annotated.sort((left, right) => Number(isRetrievable(right)) - Number(isRetrievable(left)));
+    return annotated.sort((left, right) => FULL_TEXT_RANK[fullTextLabel(left)] - FULL_TEXT_RANK[fullTextLabel(right)]);
   }
 
   async lookup(doi: string): Promise<PaperHit | undefined> {

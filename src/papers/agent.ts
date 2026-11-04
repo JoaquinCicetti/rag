@@ -1,7 +1,7 @@
 import { config } from "../config.ts";
 import type { ChatMessage, LLM, ToolArguments, ToolCall, ToolDefinition } from "../generation/llm.ts";
 import { Trace, writeTrace, type Span } from "../observability/trace.ts";
-import { isRetrievable, type DownloadedPaper, type PaperHit, type PaperSources } from "./sources.ts";
+import { fullTextLabel, type DownloadedPaper, type PaperHit, type PaperSources } from "./sources.ts";
 
 export interface PaperAgentDeps {
   llm: LLM;
@@ -50,7 +50,7 @@ const systemPrompt = (maxPapers: number): string =>
   `You are a research assistant that collects open-access scientific papers on a topic.
 1. Call search_papers with focused queries. Try different phrasings if results are weak.
 2. Pick the most relevant and influential papers from the results.
-3. Call download_paper for each chosen DOI until ${maxPapers} papers are downloaded. Only pick hits with "fulltext: yes"; "uncertain" ones usually fail. You may call download_paper several times in one reply.
+3. Call download_paper for each chosen DOI until ${maxPapers} papers are downloaded. Prefer hits with "fulltext: yes", then "pdf" (a PDF link that a publisher may block). Avoid "uncertain" ones, which usually fail. You may call download_paper several times in one reply.
 4. If a download fails, pick another paper.
 5. When done, reply with a short list of what you downloaded and why each is relevant. Do not call tools in that reply.`;
 
@@ -60,7 +60,7 @@ const nudge = (downloadedCount: number, maxPapers: number): string =>
   `You have actually downloaded ${downloadedCount}/${maxPapers} papers. Nothing is downloaded unless you call download_paper. Call download_paper with DOIs from the search results, or search_papers again.`;
 
 const formatHit = (hit: PaperHit): string =>
-  `- doi: ${hit.doi}\n  title: ${hit.title} (${hit.year ?? "n.d."})\n  authors: ${hit.authors.join(", ")}\n  fulltext: ${isRetrievable(hit) ? "yes" : "uncertain"}\n  abstract: ${hit.abstract || "n/a"}`;
+  `- doi: ${hit.doi}\n  title: ${hit.title} (${hit.year ?? "n.d."})\n  authors: ${hit.authors.join(", ")}\n  fulltext: ${fullTextLabel(hit)}\n  abstract: ${hit.abstract || "n/a"}`;
 
 const stringArgument = (args: ToolArguments, key: string): string => {
   const value = args[key];
@@ -117,6 +117,7 @@ const run = async (
   const downloadPaper = async (args: ToolArguments, span: Span): Promise<string> => {
     const doi = stringArgument(args, "doi").toLowerCase();
     if (!doi) return "error: doi is required";
+    if (downloaded.length >= options.maxPapers) return `target of ${options.maxPapers} papers already reached; ${doi} was not downloaded`;
     if (downloaded.some((paper) => paper.doi === doi)) return `already downloaded ${doi}`;
     const hit = seenHits.get(doi) ?? (await deps.sources.lookup(doi));
     if (!hit) return `error: unknown DOI ${doi}`;

@@ -27,6 +27,12 @@ bun run chunks data/samples --strategy fixed,paragraph,heading   # compare sizes
 bun run ingest data/samples --strategy heading
 ```
 
+## Search UI
+
+`bun run dev`, then open http://localhost:3000. **Search** finds passages without calling the LLM. **Ask** answers with the LLM and clickable `[n]` citations. Results and citations open the full document with the passage highlighted.
+
+The viewer rebuilds each document from its indexed chunks, so it shows the extracted text rather than the original file.
+
 ## Tracing
 
 Every `ask` and `ingest` writes a trace (one JSONL line) to `data/traces/YYYY-MM-DD.jsonl`.
@@ -48,6 +54,10 @@ An LLM tool-calling agent that searches open-access papers (OpenAlex), finds a l
 bun run papers "retrieval augmented generation" --max 5 --ingest
 bun run traces <id>                       # llm steps and tool calls
 ```
+
+Papers from Europe PMC keep tables (`a | b` rows) and equations (from TeX or MathML), and a marker shows where one exists only as an image. PDFs are plain extracted text, so their tables and equations can come out scrambled, and `ask` may then present an invented equation next to correct coefficients. Check equations against the original PDF.
+
+To switch topic, run `bun run infra:reset` first. It empties the index and deletes the downloaded papers. `ingest` never removes chunks for a file you delete, so remove off-topic downloads before indexing.
 
 ## Docs
 

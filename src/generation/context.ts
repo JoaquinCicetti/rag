@@ -36,9 +36,12 @@ export const buildContext = (chunks: Array<RetrievedChunk>, options?: ContextOpt
     usedChars += block.length;
     citations.push({
       n: citationNumber,
+      sourceId: chunk.metadata.sourceId,
       sourcePath: chunk.metadata.sourcePath,
       title: chunk.metadata.title,
       chunkIndex: chunk.metadata.chunkIndex,
+      start: chunk.metadata.start,
+      end: chunk.metadata.end,
       score: chunk.score,
       snippet: snippet(chunk.text),
       ...(section ? { section } : {}),
