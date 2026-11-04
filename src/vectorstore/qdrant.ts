@@ -1,6 +1,6 @@
 import { QdrantClient } from "@qdrant/js-client-rest";
 import { config } from "../config.ts";
-import type { Chunk, ChunkMetadata, RetrievedChunk } from "../types.ts";
+import type { Chunk, ChunkMetadata, DocumentInfo, RetrievedChunk } from "../types.ts";
 
 export interface VectorStore {
   ensureCollection(dim: number): Promise<void>;
@@ -8,6 +8,8 @@ export interface VectorStore {
   search(vector: Array<number>, topK: number, filter?: SearchFilter): Promise<Array<RetrievedChunk>>;
   count(): Promise<number>;
   deleteBySource(sourceId: string): Promise<void>;
+  listDocuments(): Promise<Array<DocumentInfo>>;
+  chunksForSource(sourceId: string): Promise<Array<Chunk>>;
 }
 
 export interface SearchFilter {
@@ -32,6 +34,12 @@ interface FieldCondition {
   key: string;
   match: MatchValue;
 }
+
+type ScrollRequest = NonNullable<Parameters<QdrantClient["scroll"]>[1]>;
+type ScrollPoint = Awaited<ReturnType<QdrantClient["scroll"]>>["points"][number];
+
+const SCROLL_PAGE_SIZE = 256;
+const DOCUMENT_FIELDS = ["sourceId", "sourcePath", "title", "format"];
 
 export class QdrantStore implements VectorStore {
   readonly client: QdrantClient;
@@ -111,6 +119,39 @@ export class QdrantStore implements VectorStore {
       wait: true,
       filter: { must: [{ key: "sourceId", match: { value: sourceId } }] },
     });
+  }
+
+  async listDocuments(): Promise<Array<DocumentInfo>> {
+    const documents = new Map<string, DocumentInfo>();
+    for (const point of await this.scrollAll({ with_payload: DOCUMENT_FIELDS })) {
+      const { sourceId, sourcePath, title, format } = point.payload as unknown as Payload;
+      const known = documents.get(sourceId);
+      if (known) known.chunks++;
+      else documents.set(sourceId, { sourceId, sourcePath, title, format, chunks: 1 });
+    }
+    return [...documents.values()].sort((left, right) => left.title.localeCompare(right.title));
+  }
+
+  async chunksForSource(sourceId: string): Promise<Array<Chunk>> {
+    const points = await this.scrollAll({
+      with_payload: true,
+      filter: { must: [{ key: "sourceId", match: { value: sourceId } }] },
+    });
+    return points.map((point) => {
+      const { text, ...metadata } = point.payload as unknown as Payload;
+      return { id: String(point.id), text, metadata };
+    });
+  }
+
+  private async scrollAll(request: ScrollRequest): Promise<Array<ScrollPoint>> {
+    const points: Array<ScrollPoint> = [];
+    let offset: ScrollRequest["offset"];
+    do {
+      const page = await this.client.scroll(this.collection, { ...request, with_vector: false, limit: SCROLL_PAGE_SIZE, offset });
+      points.push(...page.points);
+      offset = page.next_page_offset ?? undefined;
+    } while (offset !== undefined);
+    return points;
   }
 }
 

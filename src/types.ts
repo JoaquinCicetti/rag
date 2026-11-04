@@ -48,13 +48,24 @@ export interface RetrievedChunk extends Chunk {
 
 export interface Citation {
   n: number;
+  sourceId: string;
   sourcePath: string;
   title: string;
   chunkIndex: number;
+  start: number;
+  end: number;
   score: number;
   snippet: string;
   section?: string;
   page?: number;
+}
+
+export interface DocumentInfo {
+  sourceId: string;
+  sourcePath: string;
+  title: string;
+  format: string;
+  chunks: number;
 }
 
 export interface Answer {

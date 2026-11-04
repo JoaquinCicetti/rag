@@ -41,6 +41,7 @@ export const config = {
     maxChars: envInt("CONTEXT_MAX_CHARS", 12000),
   },
   api: {
+    host: env("API_HOST", "127.0.0.1"),
     port: envInt("PORT", 3000),
   },
   papers: {

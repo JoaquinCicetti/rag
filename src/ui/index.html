@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RAG Search</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f5f1;
+    --panel: #fffefb;
+    --text: #1f2421;
+    --muted: #646b66;
+    --line: #dcdcd3;
+    --accent: #1d6b57;
+    --accent-text: #ffffff;
+    --mark: #f7e08a;
+    --mark-text: #1f2421;
+    --error: #a3312a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151816;
+      --panel: #1c201d;
+      --text: #e6e8e3;
+      --muted: #9aa29c;
+      --line: #323833;
+      --accent: #5cc0a4;
+      --accent-text: #0e1a16;
+      --mark: #6b5a16;
+      --mark-text: #fff8dc;
+      --error: #ef8f87;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: grid;
+    grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+    height: 100dvh;
+  }
+  button, input { font: inherit; color: inherit; }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  #side { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); background: var(--panel); }
+  form { padding: 16px; border-bottom: 1px solid var(--line); display: grid; gap: 8px; grid-template-columns: 1fr auto auto; }
+  input[type="search"] {
+    grid-column: 1 / -1;
+    width: 100%;
+    padding: 9px 11px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--bg);
+  }
+  #status { align-self: center; color: var(--muted); font-size: 13px; }
+  .action { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--line); background: transparent; cursor: pointer; }
+  .action.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  .action:disabled { opacity: .55; cursor: default; }
+
+  #list { flex: 1; overflow-y: auto; padding: 8px; min-height: 0; }
+  .heading { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin: 8px; color: var(--muted); font-size: 13px; }
+  .link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; text-decoration: underline; font-size: 13px; }
+  .item { display: block; width: 100%; text-align: left; padding: 10px; background: none; border: 0; border-radius: 6px; cursor: pointer; }
+  .item:hover, .item[aria-current="true"] { background: var(--bg); }
+  .item-title { font-weight: 600; display: block; overflow-wrap: anywhere; }
+  .item-meta { color: var(--muted); font-size: 13px; display: block; overflow-wrap: anywhere; }
+  .item-snippet { display: block; margin-top: 4px; font-size: 14px; overflow-wrap: anywhere; }
+  .notice { padding: 8px; color: var(--muted); }
+  .notice.error { color: var(--error); }
+
+  #answer { margin: 0 8px 12px; padding: 12px; border: 1px solid var(--line); border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .cite { background: none; border: 0; padding: 0 1px; color: var(--accent); cursor: pointer; font-weight: 600; }
+
+  #doc { overflow-y: auto; min-height: 0; padding: 32px; }
+  #doc-inner { max-width: 74ch; margin: 0 auto; }
+  #doc h1 { font-size: 22px; line-height: 1.3; margin: 0 0 4px; overflow-wrap: anywhere; }
+  #doc-meta { color: var(--muted); font-size: 13px; margin-bottom: 4px; overflow-wrap: anywhere; }
+  #doc-passage { color: var(--muted); font-size: 13px; margin-bottom: 20px; overflow-wrap: anywhere; }
+  #doc-text { white-space: pre-wrap; overflow-wrap: anywhere; font: 16px/1.65 Georgia, "Times New Roman", serif; }
+  mark { background: var(--mark); color: var(--mark-text); border-radius: 2px; }
+
+  @media (max-width: 760px) {
+    body { display: block; height: auto; }
+    #side { border-right: 0; border-bottom: 1px solid var(--line); }
+    #list { max-height: 50dvh; }
+    #doc { padding: 20px 16px; }
+  }
+</style>
+</head>
+<body>
+<aside id="side">
+  <form id="form">
+    <input id="query" type="search" placeholder="Search the papers…" aria-label="Search query" autofocus>
+    <span id="status" role="status"></span>
+    <button class="action primary" type="submit" id="search">Search</button>
+    <button class="action" type="button" id="ask" title="Answer with the local LLM. Slower.">Ask</button>
+  </form>
+  <div id="list"></div>
+</aside>
+<main id="doc">
+  <div id="doc-inner">
+    <p class="notice">Open a document or a search result to read it here.</p>
+  </div>
+</main>
+<script>
+  const SEARCH_TOP_K = 10;
+  const SNIPPET_CHARS = 260;
+  const $ = (id) => document.getElementById(id);
+  let latestRequest = 0;
+  let timer;
+
+  const element = (tag, className, text) => {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
+
+  const request = async (path, body) => {
+    const response = await fetch(path, body
+      ? { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }
+      : undefined);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+    return data;
+  };
+
+  const locationLabel = ({ section, page, pageEnd }) => [
+    section,
+    page !== undefined ? (pageEnd !== undefined ? `pp. ${page}–${pageEnd}` : `p. ${page}`) : undefined,
+  ].filter(Boolean).join(" · ");
+
+  const setStatus = (text) => { $("status").textContent = text; };
+
+  const setBusy = (busy) => {
+    $("search").disabled = busy;
+    $("ask").disabled = busy;
+  };
+
+  const stopTimer = () => { clearInterval(timer); setStatus(""); };
+
+  const showNotice = (text, isError) => {
+    const list = $("list");
+    list.replaceChildren(element("p", isError ? "notice error" : "notice", text));
+  };
+
+  const heading = (text, withBack) => {
+    const row = element("div", "heading");
+    row.append(element("span", "", text));
+    if (withBack) {
+      const back = element("button", "link", "All documents");
+      back.type = "button";
+      back.addEventListener("click", () => { $("query").value = ""; loadDocuments(); });
+      row.append(back);
+    }
+    return row;
+  };
+
+  const passageButton = (title, meta, snippet, target) => {
+    const button = element("button", "item");
+    button.type = "button";
+    button.append(element("span", "item-title", title), element("span", "item-meta", meta));
+    if (snippet) button.append(element("span", "item-snippet", snippet));
+    button.addEventListener("click", () => {
+      document.querySelectorAll(".item[aria-current]").forEach((node) => node.removeAttribute("aria-current"));
+      button.setAttribute("aria-current", "true");
+      openDocument(target);
+    });
+    return button;
+  };
+
+  const loadDocuments = async () => {
+    const ticket = ++latestRequest;
+    stopTimer();
+    showNotice("Loading documents…");
+    try {
+      const documents = await request("/documents");
+      if (ticket !== latestRequest) return;
+      if (documents.length === 0) return showNotice("The index is empty. Run bun run ingest <path> to add documents.");
+      $("list").replaceChildren(
+        heading(`${documents.length} document${documents.length === 1 ? "" : "s"}`),
+        ...documents.map((item) => passageButton(
+          item.title,
+          `${item.format} · ${item.chunks} chunks · ${item.sourcePath}`,
+          "",
+          { sourceId: item.sourceId },
+        )),
+      );
+    } catch (error) {
+      if (ticket === latestRequest) showNotice(`Could not load documents: ${error.message}`, true);
+    }
+  };
+
+  const search = async (query) => {
+    const ticket = ++latestRequest;
+    stopTimer();
+    setBusy(true);
+    showNotice("Searching…");
+    try {
+      const { chunks } = await request("/search", { query, topK: SEARCH_TOP_K });
+      if (ticket !== latestRequest) return;
+      const results = chunks.map((chunk) => {
+        const location = locationLabel(chunk.metadata);
+        const meta = [`score ${chunk.score.toFixed(3)}`, location].filter(Boolean).join(" · ");
+        const snippet = chunk.text.length > SNIPPET_CHARS ? `${chunk.text.slice(0, SNIPPET_CHARS)}…` : chunk.text;
+        return passageButton(chunk.metadata.title, meta, snippet, {
+          sourceId: chunk.metadata.sourceId,
+          start: chunk.metadata.start,
+          end: chunk.metadata.end,
+        });
+      });
+      if (results.length === 0) showNotice("No passages found. Is the index empty?");
+      else $("list").replaceChildren(heading(`${results.length} passages`, true), ...results);
+    } catch (error) {
+      if (ticket === latestRequest) showNotice(`Search failed: ${error.message}`, true);
+    } finally {
+      if (ticket === latestRequest) setBusy(false);
+    }
+  };
+
+  const answerNode = (text, citations) => {
+    const byNumber = new Map(citations.map((citation) => [citation.n, citation]));
+    const node = element("div");
+    node.id = "answer";
+    text.split(/(\[\d+\])/).forEach((part) => {
+      const citation = byNumber.get(Number(part.match(/^\[(\d+)\]$/)?.[1]));
+      if (!citation) return node.append(document.createTextNode(part));
+      const cite = element("button", "cite", part);
+      cite.type = "button";
+      cite.title = citation.title;
+      cite.addEventListener("click", () => openDocument(citation));
+      node.append(cite);
+    });
+    return node;
+  };
+
+  const ask = async (question) => {
+    const ticket = ++latestRequest;
+    stopTimer();
+    setBusy(true);
+    const startedAt = Date.now();
+    const tick = () => setStatus(`Asking the model… ${Math.round((Date.now() - startedAt) / 1000)}s`);
+    tick();
+    timer = setInterval(tick, 1000);
+    showNotice("The local model can take a minute or more.");
+    try {
+      const answer = await request("/ask", { question });
+      if (ticket !== latestRequest) return;
+      const sources = answer.citations.map((citation) => passageButton(
+        `[${citation.n}] ${citation.title}`,
+        [`score ${citation.score.toFixed(3)}`, locationLabel(citation)].filter(Boolean).join(" · "),
+        citation.snippet,
+        citation,
+      ));
+      $("list").replaceChildren(
+        heading(`Answer from ${answer.model}`, true),
+        answerNode(answer.answer, answer.citations),
+        ...sources,
+      );
+    } catch (error) {
+      if (ticket === latestRequest) showNotice(`Ask failed: ${error.message}`, true);
+    } finally {
+      if (ticket === latestRequest) { stopTimer(); setBusy(false); }
+    }
+  };
+
+  let documentRequest = 0;
+
+  const openDocument = async ({ sourceId, start, end }) => {
+    const ticket = ++documentRequest;
+    const inner = $("doc-inner");
+    inner.replaceChildren(element("p", "notice", "Loading document…"));
+    try {
+      const data = await request(`/documents/${encodeURIComponent(sourceId)}`);
+      if (ticket !== documentRequest) return;
+      const title = element("h1", "", data.title);
+      const meta = element("div", "", `${data.format} · ${data.chunks.length} chunks · ${data.sourcePath}`);
+      meta.id = "doc-meta";
+      const passage = element("div");
+      passage.id = "doc-passage";
+      const body = element("div");
+      body.id = "doc-text";
+      if (start === undefined) {
+        body.textContent = data.text;
+      } else {
+        const mark = element("mark", "", data.text.slice(start, end));
+        body.append(document.createTextNode(data.text.slice(0, start)), mark, document.createTextNode(data.text.slice(end)));
+        const chunk = data.chunks.find((item) => item.start === start && item.end === end);
+        passage.textContent = chunk ? locationLabel(chunk) : "";
+      }
+      inner.replaceChildren(title, meta, passage, body);
+      $("doc").scrollTop = 0;
+      inner.querySelector("mark")?.scrollIntoView({ block: "center" });
+    } catch (error) {
+      if (ticket === documentRequest) inner.replaceChildren(element("p", "notice error", `Could not open document: ${error.message}`));
+    }
+  };
+
+  const currentQuery = () => $("query").value.trim();
+
+  $("form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    if ($("search").disabled) return;
+    const query = currentQuery();
+    if (query) search(query);
+    else loadDocuments();
+  });
+
+  $("ask").addEventListener("click", () => {
+    const question = currentQuery();
+    if (question) ask(question);
+    else $("query").focus();
+  });
+
+  loadDocuments();
+</script>
+</body>
+</html>
